@@ -10,12 +10,13 @@ Transformer network
 import tensorflow as tf
 
 from data_load import load_vocab
-from modules import get_token_embeddings, ff, positional_encoding, multihead_attention, label_smoothing, noam_scheme
+from modules import ff, positional_encoding, multihead_attention, label_smoothing, noam_scheme
 from utils import convert_idx_to_token_tensor
 from tqdm import tqdm
 import logging
 
 logging.basicConfig(level=logging.INFO)
+
 
 class Transformer:
     '''
@@ -33,7 +34,6 @@ class Transformer:
     def __init__(self, hp):
         self.hp = hp
         self.token2idx, self.idx2token = load_vocab(hp.vocab)
-        self.embeddings = get_token_embeddings(self.hp.vocab_size, self.hp.d_model, zero_pad=True)
 
     def encode(self, xs, training=True):
         '''
@@ -41,12 +41,13 @@ class Transformer:
         memory: encoder outputs. (N, T1, d_model)
         '''
         with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE):
+            # assume x: [batch_size, time, loc, measurement]
             x, seqlens, sents1 = xs
 
             # src_masks
-            src_masks = tf.math.equal(x, 0) # (N, T1)
+            src_masks = tf.math.equal(x, 0) # (N, T1)-->[batch_size, time, loc, measurement]
 
-            # embedding
+            # position encoding
             enc = tf.nn.embedding_lookup(self.embeddings, x) # (N, T1, d_model)
             enc *= self.hp.d_model**0.5 # scale
 
