@@ -22,9 +22,12 @@ class Hparams:
     ## vocabulary
     parser.add_argument('--vocab', default='iwslt2016/segmented/bpe.vocab',
                         help="vocabulary file path")
-
+    # data
+    parser.add_argument('--in_seqlen', default=12)
+    parser.add_argument('--out_seqlen', default=12)
+    parser.add_argument('--num_predictor', default=3)
     # training scheme
-    parser.add_argument('--batch_size', default=128, type=int)
+    parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--eval_batch_size', default=128, type=int)
 
     parser.add_argument('--lr', default=0.0003, type=float, help="learning rate")
@@ -33,6 +36,9 @@ class Hparams:
     parser.add_argument('--num_epochs', default=20, type=int)
     parser.add_argument('--evaldir', default="eval/1", help="evaluation dir")
 
+    # spatial extract
+    parser.add_argument('--conv_hidden', default=[2, 4, 8, 16, 32])
+    parser.add_argument('--conv_kernel', default=3)
     # model
     parser.add_argument('--d_model', default=512, type=int,
                         help="hidden dimension of encoder/decoder")

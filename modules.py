@@ -10,6 +10,7 @@ Building blocks for Transformer
 
 import numpy as np
 import tensorflow as tf
+import math
 
 
 def ln(inputs, epsilon=1e-8, scope="ln"):
@@ -32,6 +33,38 @@ def ln(inputs, epsilon=1e-8, scope="ln"):
         outputs = gamma * normalized + beta
 
     return outputs
+
+
+def conv_attention_layer(inputs, k):
+    outputs = tf.layers.dense(tf.layers.dense(inputs=inputs, units=k, activation='tanh'), units=1)
+    outputs = tf.nn.softmax(outputs, -2)
+    return outputs
+
+
+def weighted_sum_block(info, alpha, time_len):
+    info = tf.multiply(alpha, info)
+    info = tf.keras.layers.Lambda(lambda x: tf.split(x, num_or_size_splits=time_len, axis=-2))(info)
+    outputs = tf.keras.layers.add(info)
+    return outputs
+
+
+def feature_embedding(inputs, num_hidden, kernel_size):
+    embeddings = []
+    batch, time, width, height, predictors = inputs.get_shape().as_list()[0:4]
+    inputs = tf.reshape(inputs, [-1, width, height, predictors])
+    for i in range(predictors):
+        embeddings.append(feature_generator(inputs=inputs[:, :, :, i], num_hidden=num_hidden, kernel_size=kernel_size))
+    embeddings = tf.reshape(np.stack(embeddings, axis=-1), [batch, time, width*height, predictors])
+    return embeddings
+
+
+def feature_generator(inputs, num_hidden, kernel_size, scope="feature_generator"):
+    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=inputs, filters=num_hidden[0], kernel_size=kernel_size))
+        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[1], kernel_size=kernel_size))
+        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[2], kernel_size=kernel_size))
+        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[3], kernel_size=kernel_size))
+    return out
 
 
 def mask(inputs, key_masks=None, type=None):
@@ -89,27 +122,24 @@ def cross_attention(Q, K, V, att_unit, key_masks=None, causality=False, scope="c
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # batch_size*num_heads
         segs = V.get_shape().as_list()[0]
-        time, loc, measure = Q[0].get_shape().as_list()[1], Q[1].get_shape().as_list()[1], Q[2].get_shape().as_list()[1]
-        (value_units, Tunits, Lunits, Munits) = att_unit
+        time, measure = Q[0].get_shape().as_list()[1], Q[1].get_shape().as_list()[1]
+        (value_units, Tunits, Munits) = att_unit
 
-        (Q_T, Q_L, Q_M) = Q
-        (K_T, K_L, K_M) = K
+        (Q_T, Q_M) = Q
+        (K_T, K_M) = K
 
         # Check the dimension consistency of the combined matrix
         assert Q_T.get_shape().as_list()[1:] == K_T.get_shape().as_list()[1:]
-        assert Q_L.get_shape().as_list()[1:] == K_L.get_shape().as_list()[1:]
         assert Q_M.get_shape().as_list()[1:] == K_M.get_shape().as_list()[1:]
-        assert Q_T.get_shape().as_list()[0] == Q_L.get_shape().as_list()[0] == Q_M.get_shape().as_list()[0]
-        assert K_T.get_shape().as_list()[0] == K_L.get_shape().as_list()[0] == K_M.get_shape().as_list()[0]
+        assert Q_T.get_shape().as_list()[0] == Q_M.get_shape().as_list()[0]
+        assert K_T.get_shape().as_list()[0] == K_M.get_shape().as_list()[0]
 
         # Build the Attention Map and scale
         AM_Time = tf.matmul(Q_T, tf.transpose(K_T, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, T, T)
-        AM_Location = tf.matmul(Q_L, tf.transpose(K_L, [0, 2, 1])) / tf.sqrt(tf.cast(Lunits, tf.float32))  # (N*h, L, L)
         AM_Measure = tf.matmul(Q_M, tf.transpose(K_M, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, M, M)
 
         # key masking
         AM_Time = mask(AM_Time, key_masks=key_masks, type="key")
-        AM_Location = mask(AM_Location, key_masks=key_masks, type="key")
         AM_Measure = mask(AM_Measure, key_masks=key_masks, type="key")
 
         # causality or future blinding masking for decoder
@@ -117,20 +147,16 @@ def cross_attention(Q, K, V, att_unit, key_masks=None, causality=False, scope="c
             AM_Time = mask(AM_Time, type="future")
 
         AM_Time = tf.nn.softmax(AM_Time)
-        AM_Location = tf.nn.softmax(AM_Location)
         AM_Measure = tf.nn.softmax(AM_Measure)
 
-        shape_time = [segs, time, loc, measure, value_units]
-        shape_loc = [segs, loc, time, measure, value_units]
-        shape_measure = [segs, measure, time, loc, value_units]
+        shape_time = [segs, time, measure, value_units]
+        shape_measure = [segs, measure, time, value_units]
 
         # decomposed manner in CDSA
         Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, -1])), shape_time)
-        Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3, 4])
-        Out_Time_Loc = tf.reshape(tf.matmul(AM_Location, tf.reshape(Out_Time, [segs, loc, -1])), shape_loc)
-        Out_Time_Loc = tf.transpose(Out_Time_Loc, perm=[0, 3, 2, 1, 4])
-        Out_Time_Loc_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time_Loc, [segs, measure, -1])), shape_measure)
-    return tf.transpose(Out_Time_Loc_M, perm=[0, 2, 3, 1, 4])
+        Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3])
+        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, -1])), shape_measure)
+    return tf.transpose(Out_Time_M, perm=[0, 2, 1, 3])
 
 
 def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
@@ -155,50 +181,44 @@ def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
     Returns
       A 3d tensor with shape of (N, T_q, C)  
     '''
-    # assume input: [batch_size, time, loc, measurement, 1]
+    # assume input: [batch_size, time, measurement, feature]
     # d_model = queries.get_shape().as_list()[-1]
-    (value_units, Tunits, Lunits, Munits) = att_unit
+    (value_units, Tunits, Munits) = att_unit
     V_filters, (V_kernel, V_stride) = value_units * num_heads, value_attr
-    batch, time, loc, measure = queries.get_shape().as_list()[:4]
+    batch, time, measure = queries.get_shape().as_list()[:3]
 
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Linear projections
         Q_time = tf.layers.dense(tf.reshape(queries, [batch, time, -1]), num_heads * Tunits, use_bias=True,
                                  name='Q_Time')
         K_time = tf.layers.dense(tf.reshape(keys, [batch, time, -1]), num_heads * Tunits, use_bias=True, name='K_Time')
-        Q_loc = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3, 4]), [batch, loc, -1]),
-                                num_heads * Lunits, use_bias=True, name='Q_Loc')  # (N, L, num_heads * Lunits)
-        K_loc = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3, 4]), [batch, loc, -1]), num_heads * Lunits,
-                                use_bias=True, name='K_Loc')  # (N, L, num_heads * Lunits)
-        Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 3, 1, 2, 4]), [batch, measure, -1]),
+        Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, -1]),
                               num_heads * Munits, use_bias=True, name='Q_M')
-        K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 3, 1, 2, 4]), [batch, measure, -1]), num_heads * Munits,
+        K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, -1]), num_heads * Munits,
                               use_bias=True, name='K_M')
-        # same shape with inputs [batch_size, time, loc, measurement, filters]
-        V = tf.layers.conv3d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
+        # same shape with inputs [batch_size, time, measurement, feature]
+        V = tf.layers.conv2d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
                              data_format="channels_last", name='V')
 
         # Split and concat
         # Split the matrix to multiple heads and then concatenate to build a larger batch size:
         Qhb_time = tf.concat(tf.split(Q_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
         Khb_time = tf.concat(tf.split(K_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
-        Qhb_loc = tf.concat(tf.split(Q_loc, num_heads, axis=2), axis=0)
-        Khb_loc = tf.concat(tf.split(K_loc, num_heads, axix=2), axis=0)
         Qhb_m = tf.concat(tf.split(Q_m, num_heads, axis=2), axis=0)
         Khb_m = tf.concat(tf.split(K_m, num_heads, axix=2), axis=0)
-        Q_headbatch = (Qhb_time, Qhb_loc, Qhb_m)
-        K_headbatch = (Khb_time, Khb_loc, Khb_m)
+        Q_headbatch = (Qhb_time, Qhb_m)
+        K_headbatch = (Khb_time, Khb_m)
 
-        # [batch_size*num_heads, time, loc, measurement, value_units]
-        V_headbatch = tf.concat(tf.split(V, num_heads, axis=4), axis=0)
+        # [batch_size*num_heads, time, measurement, value_units]
+        V_headbatch = tf.concat(tf.split(V, num_heads, axis=3), axis=0)
 
         # Attention
         outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, att_unit, key_masks, causality)
 
         # Merge the multi-head back to the original shape
-        # [batch_size, time, loc, measurement, filters]
-        outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=4)
-        outputs = tf.layers.dense(outputs, 1, name='multihead_fuse')
+        # [batch_size, time, measurement, filters]
+        outputs = tf.concat(tf.split(outputs, num_heads, axis=0), axis=3)
+        # outputs = tf.layers.dense(outputs, 1, name='multihead_fuse')
         outputs = tf.layers.dropout(outputs, rate=dropout_rate, training=training)
 
         # Residual connection
@@ -310,6 +330,18 @@ def positional_encoding(inputs,
             outputs = tf.where(tf.equal(inputs, 0), inputs, outputs)
 
         return tf.to_float(outputs)
+
+
+def auxiliary_encode(inputs):
+    # inputs: [batch_size, time, loc, measurement, 1]
+    # outputs: [batch_size, time, loc, measurement, 1]
+    N, T, L, M = tf.shape(inputs)[:4]
+    with tf.variable_scope('auxiliary encode'):
+        denom = tf.constant(1000.0)
+        phase = tf.linspace(0.0, T - 1.0, T) * tf.constant(math.pi / 180.0) / denom
+        sin = tf.expand_dims(tf.expand_dims(tf.sin(phase), 0), -1)
+        time_encoding = tf.expand_dims(tf.tile(tf.expand_dims(sin, -1), [N, 1, L, M]), -1)
+        return time_encoding
 
 
 def noam_scheme(init_lr, global_step, warmup_steps=4000.):
