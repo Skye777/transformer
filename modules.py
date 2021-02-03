@@ -48,26 +48,7 @@ def weighted_sum_block(info, alpha, time_len):
     return outputs
 
 
-def feature_embedding(inputs, num_hidden, kernel_size):
-    embeddings = []
-    batch, time, width, height, predictors = inputs.get_shape().as_list()[0:4]
-    inputs = tf.reshape(inputs, [-1, width, height, predictors])
-    for i in range(predictors):
-        embeddings.append(feature_generator(inputs=inputs[:, :, :, i], num_hidden=num_hidden, kernel_size=kernel_size))
-    embeddings = tf.reshape(np.stack(embeddings, axis=-1), [batch, time, width*height, predictors])
-    return embeddings
-
-
-def feature_generator(inputs, num_hidden, kernel_size, scope="feature_generator"):
-    with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
-        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=inputs, filters=num_hidden[0], kernel_size=kernel_size))
-        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[1], kernel_size=kernel_size))
-        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[2], kernel_size=kernel_size))
-        out = tf.layers.batch_normalization(tf.layers.conv2d(inputs=out, filters=num_hidden[3], kernel_size=kernel_size))
-    return out
-
-
-def mask(inputs, key_masks=None, type=None):
+def mask(inputs, type=None):
     """Masks paddings on keys or queries to inputs
     inputs: 3d tensor. (h*N, T_q, T_k)
     key_masks: 3d tensor. (N, 1, T_k)
@@ -91,11 +72,11 @@ def mask(inputs, key_masks=None, type=None):
         [ 0.0000000e+00, -4.2949673e+09, -4.2949673e+09]]], dtype=float32)
     """
     padding_num = -2 ** 32 + 1
-    if type in ("k", "key", "keys"):
-        key_masks = tf.to_float(key_masks)
-        key_masks = tf.tile(key_masks, [tf.shape(inputs)[0] // tf.shape(key_masks)[0], 1])  # (h*N, seqlen)
-        key_masks = tf.expand_dims(key_masks, 1)  # (h*N, 1, seqlen)
-        outputs = inputs + key_masks * padding_num
+    # if type in ("k", "key", "keys"):
+    #     key_masks = tf.to_float(key_masks)
+    #     key_masks = tf.tile(key_masks, [tf.shape(inputs)[0] // tf.shape(key_masks)[0], 1])  # (h*N, seqlen)
+    #     key_masks = tf.expand_dims(key_masks, 1)  # (h*N, 1, seqlen)
+    #     outputs = inputs + key_masks * padding_num
     # elif type in ("q", "query", "queries"):
     #     # Generate masks
     #     masks = tf.sign(tf.reduce_sum(tf.abs(queries), axis=-1))  # (N, T_q)
@@ -104,7 +85,7 @@ def mask(inputs, key_masks=None, type=None):
     #
     #     # Apply masks to inputs
     #     outputs = inputs*masks
-    elif type in ("f", "future", "right"):
+    if type in ("f", "future", "right"):
         diag_vals = tf.ones_like(inputs[0, :, :])  # (T_q, T_k)
         tril = tf.linalg.LinearOperatorLowerTriangular(diag_vals).to_dense()  # (T_q, T_k)
         future_masks = tf.tile(tf.expand_dims(tril, 0), [tf.shape(inputs)[0], 1, 1])  # (N, T_q, T_k)
@@ -117,11 +98,11 @@ def mask(inputs, key_masks=None, type=None):
     return outputs
 
 
-def cross_attention(Q, K, V, att_unit, key_masks=None, causality=False, scope="cross_attention"):
+def cross_attention(Q, K, V, att_unit, causality=False, scope="cross_attention"):
     '''mask is applied before the softmax layer, no dropout is applied, '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # batch_size*num_heads
-        segs = V.get_shape().as_list()[0]
+        segs = tf.shape(V)[0]
         time, measure = Q[0].get_shape().as_list()[1], Q[1].get_shape().as_list()[1]
         (value_units, Tunits, Munits) = att_unit
 
@@ -138,10 +119,6 @@ def cross_attention(Q, K, V, att_unit, key_masks=None, causality=False, scope="c
         AM_Time = tf.matmul(Q_T, tf.transpose(K_T, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, T, T)
         AM_Measure = tf.matmul(Q_M, tf.transpose(K_M, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, M, M)
 
-        # key masking
-        AM_Time = mask(AM_Time, key_masks=key_masks, type="key")
-        AM_Measure = mask(AM_Measure, key_masks=key_masks, type="key")
-
         # causality or future blinding masking for decoder
         if causality:
             AM_Time = mask(AM_Time, type="future")
@@ -153,13 +130,13 @@ def cross_attention(Q, K, V, att_unit, key_masks=None, causality=False, scope="c
         shape_measure = [segs, measure, time, value_units]
 
         # decomposed manner in CDSA
-        Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, -1])), shape_time)
+        Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, measure*value_units])), shape_time)
         Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3])
-        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, -1])), shape_measure)
+        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, time*value_units])), shape_measure)
     return tf.transpose(Out_Time_M, perm=[0, 2, 1, 3])
 
 
-def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
+def multihead_attention(queries, keys, values, att_unit, value_attr,
                         num_heads=8,
                         dropout_rate=0,
                         training=True,
@@ -185,16 +162,17 @@ def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
     # d_model = queries.get_shape().as_list()[-1]
     (value_units, Tunits, Munits) = att_unit
     V_filters, (V_kernel, V_stride) = value_units * num_heads, value_attr
-    batch, time, measure = queries.get_shape().as_list()[:3]
+    batch = tf.shape(queries)[0]
+    time, measure, feature = queries.get_shape().as_list()[1:]
 
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # Linear projections
-        Q_time = tf.layers.dense(tf.reshape(queries, [batch, time, -1]), num_heads * Tunits, use_bias=True,
+        Q_time = tf.layers.dense(tf.reshape(queries, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True,
                                  name='Q_Time')
-        K_time = tf.layers.dense(tf.reshape(keys, [batch, time, -1]), num_heads * Tunits, use_bias=True, name='K_Time')
-        Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, -1]),
+        K_time = tf.layers.dense(tf.reshape(keys, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True, name='K_Time')
+        Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, time*feature]),
                               num_heads * Munits, use_bias=True, name='Q_M')
-        K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, -1]), num_heads * Munits,
+        K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, time*feature]), num_heads * Munits,
                               use_bias=True, name='K_M')
         # same shape with inputs [batch_size, time, measurement, feature]
         V = tf.layers.conv2d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
@@ -205,7 +183,7 @@ def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
         Qhb_time = tf.concat(tf.split(Q_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
         Khb_time = tf.concat(tf.split(K_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
         Qhb_m = tf.concat(tf.split(Q_m, num_heads, axis=2), axis=0)
-        Khb_m = tf.concat(tf.split(K_m, num_heads, axix=2), axis=0)
+        Khb_m = tf.concat(tf.split(K_m, num_heads, axis=2), axis=0)
         Q_headbatch = (Qhb_time, Qhb_m)
         K_headbatch = (Khb_time, Khb_m)
 
@@ -213,7 +191,7 @@ def multihead_attention(queries, keys, values, att_unit, value_attr, key_masks,
         V_headbatch = tf.concat(tf.split(V, num_heads, axis=3), axis=0)
 
         # Attention
-        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, att_unit, key_masks, causality)
+        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, att_unit, causality)
 
         # Merge the multi-head back to the original shape
         # [batch_size, time, measurement, filters]
@@ -335,12 +313,15 @@ def positional_encoding(inputs,
 def auxiliary_encode(inputs):
     # inputs: [batch_size, time, loc, measurement, 1]
     # outputs: [batch_size, time, loc, measurement, 1]
-    N, T, L, M = tf.shape(inputs)[:4]
-    with tf.variable_scope('auxiliary encode'):
+    # inputs: [b, t, m, f]
+    # outputs: [b, t, m, f]
+    N = tf.shape(inputs)[0]
+    T, M, F = inputs.get_shape().as_list()[1:4]
+    with tf.variable_scope('auxiliary_encode'):
         denom = tf.constant(1000.0)
         phase = tf.linspace(0.0, T - 1.0, T) * tf.constant(math.pi / 180.0) / denom
         sin = tf.expand_dims(tf.expand_dims(tf.sin(phase), 0), -1)
-        time_encoding = tf.expand_dims(tf.tile(tf.expand_dims(sin, -1), [N, 1, L, M]), -1)
+        time_encoding = tf.tile(tf.expand_dims(sin, -1), [N, 1, M, F])
         return time_encoding
 
 

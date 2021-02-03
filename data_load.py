@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-#/usr/bin/python3
+# /usr/bin/python3
 '''
 Feb. 2019 by kyubyong park.
 kbpark.linguist@gmail.com.
@@ -11,6 +11,7 @@ For example, fpath1, fpath2 means source file path and target file path, respect
 '''
 import tensorflow as tf
 from utils import calc_num_batches
+
 
 def load_vocab(vocab_fpath):
     '''Loads vocabulary file and returns idx<->token maps
@@ -26,6 +27,7 @@ def load_vocab(vocab_fpath):
     idx2token = {idx: token for idx, token in enumerate(vocab)}
     return token2idx, idx2token
 
+
 def load_data(fpath1, fpath2, maxlen1, maxlen2):
     '''Loads source and target data and filters out too lengthy samples.
     fpath1: source file path. string.
@@ -40,7 +42,7 @@ def load_data(fpath1, fpath2, maxlen1, maxlen2):
     sents1, sents2 = [], []
     with open(fpath1, 'r', encoding='utf-8') as f1, open(fpath2, 'r', encoding='utf-8') as f2:
         for sent1, sent2 in zip(f1, f2):
-            if len(sent1.split()) + 1 > maxlen1: continue # 1: </s>
+            if len(sent1.split()) + 1 > maxlen1: continue  # 1: </s>
             if len(sent2.split()) + 1 > maxlen2: continue  # 1: </s>
             sents1.append(sent1.strip())
             sents2.append(sent2.strip())
@@ -57,11 +59,14 @@ def encode(inp, type, dict):
     list of numbers
     '''
     inp_str = inp.decode("utf-8")
-    if type=="x": tokens = inp_str.split() + ["</s>"]
-    else: tokens = ["<s>"] + inp_str.split() + ["</s>"]
+    if type == "x":
+        tokens = inp_str.split() + ["</s>"]
+    else:
+        tokens = ["<s>"] + inp_str.split() + ["</s>"]
 
     x = [dict.get(t, dict["<unk>"]) for t in tokens]
     return x
+
 
 def generator_fn(sents1, sents2, vocab_fpath):
     '''Generates training / evaluation data
@@ -89,6 +94,7 @@ def generator_fn(sents1, sents2, vocab_fpath):
         x_seqlen, y_seqlen = len(x), len(y)
         yield (x, x_seqlen, sent1), (decoder_input, y, y_seqlen, sent2)
 
+
 def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
     '''Batchify data
     sents1: list of source sents
@@ -115,19 +121,19 @@ def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
     paddings = ((0, 0, ''),
                 (0, 0, 0, ''))
 
-    dataset = tf.data.Dataset.from_generator(
-        generator_fn,
-        output_shapes=shapes,
-        output_types=types,
-        args=(sents1, sents2, vocab_fpath))  # <- arguments for generator_fn. converted to np string arrays
+    dataset = tf.data.Dataset.from_generator(generator_fn,
+                                             output_shapes=shapes,
+                                             output_types=types,
+                                             args=(sents1, sents2, vocab_fpath))  # <- arguments for generator_fn. converted to np string arrays
 
-    if shuffle: # for training
-        dataset = dataset.shuffle(128*batch_size)
+    if shuffle:  # for training
+        dataset = dataset.shuffle(128 * batch_size)
 
     dataset = dataset.repeat()  # iterate forever
     dataset = dataset.padded_batch(batch_size, shapes, paddings).prefetch(1)
 
     return dataset
+
 
 def get_batch(fpath1, fpath2, maxlen1, maxlen2, vocab_fpath, batch_size, shuffle=False):
     '''Gets training / evaluation mini-batches

@@ -47,14 +47,14 @@ class Transformer:
     def embedding_module(self, inputs, encode_phase):
         # inputs: [batch_size, time, w, h, predictor]
         time, predictors = self.hp.in_seqlen, self.hp.num_predictor
-        inputs = [inputs[:, :, :, :, i].reshape((inputs.shape[0], inputs.shape[1], inputs.shape[2], inputs.shape[3], 1))
-                  for i in range(predictors)]   # (predictor, batch, time, w, h, 1)
+        # batch, time, w, h = inputs.get_shape().as_list()[0:4]
+        # inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)   # (predictor, batch, time, w, h, 1)
         embeddings = []
         # in_layers, out_layers = [], []
         for i in range(predictors):
             # inputs = Input(shape=(time, 320, 640, 1))
             conv_out = TimeDistributed(tf.layers.Conv2D(filters=2, kernel_size=3, padding='same', activation=LeakyReLU()),
-                                       input_shape=(12, 320, 640, 1))(inputs[i])  # (b, t, 320, 640, f1)
+                                       input_shape=(12, 320, 640, 1))(inputs)  # (b, t, 320, 640, f1)
             pool_out = TimeDistributed(tf.layers.MaxPooling2D(pool_size=2, strides=2))(conv_out)  # (b, t, 160, 320, f1)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(pool_out)
             if encode_phase:
@@ -107,33 +107,37 @@ class Transformer:
         for i in range(predictors):
             # inputs = Input(shape=(time, 4, 8, 32))
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=16, kernel_size=5, strides=5, activation=LeakyReLU()))(inputs=inputs[i])
-            bn_out = TimeDistributed(tf.layers.BatchNormalization(deconv_out))
-            deconv_out = TimeDistributed(Concatenate())([self.skip_layer_feature_maps_4[i], bn_out])   # (b, t, 20, 40, f4)
+            bn_out = TimeDistributed(tf.layers.BatchNormalization())(deconv_out)
+            skip_layer_4 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_4[i], 1), [1, time, 1, 1, 1])
+            deconv_out = Concatenate()([skip_layer_4, bn_out])   # (b, t, 20, 40, f4)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=8, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
-            bn_out = TimeDistributed(tf.layers.BatchNormalization(up_sampling_out))
-            deconv_out = TimeDistributed(Concatenate())([self.skip_layer_feature_maps_3[i], bn_out])   # (b, t, 40, 80, f3)
+            bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
+            skip_layer_3 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_3[i], 1), [1, time, 1, 1, 1])
+            deconv_out = Concatenate()([skip_layer_3, bn_out])   # (b, t, 40, 80, f3)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=4, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
-            bn_out = TimeDistributed(tf.layers.BatchNormalization(up_sampling_out))
-            deconv_out = TimeDistributed(Concatenate())([self.skip_layer_feature_maps_2[i], bn_out])   # (b, t, 80, 160, f2)
+            bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
+            skip_layer_2 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_2[i], 1), [1, time, 1, 1, 1])
+            deconv_out = Concatenate()([skip_layer_2, bn_out])   # (b, t, 80, 160, f2)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=2, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
-            bn_out = TimeDistributed(tf.layers.BatchNormalization(up_sampling_out))
-            deconv_out = TimeDistributed(Concatenate())([self.skip_layer_feature_maps_1[i], bn_out])  # (b, t, 160, 320, f1)
+            bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
+            skip_layer_1 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_1[i], 1), [1, time, 1, 1, 1])
+            deconv_out = Concatenate()([skip_layer_1, bn_out])  # (b, t, 160, 320, f1)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=1, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
-            bn_out = TimeDistributed(tf.layers.BatchNormalization(up_sampling_out))  # (b, t, 320, 640, 1)
+            bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)  # (b, t, 320, 640, 1)
             outputs.append(bn_out)
             # in_layers.append(inputs)
             # out_layers.append(out_feature)
             # model = Model(inputs=in_layers, outputs=out_layers)
             # print(model.summary())
-        outputs = np.stack(outputs, axis=-1)
+        outputs = Concatenate()(outputs)
         return outputs
 
     def encode(self, x, training=True):
@@ -143,9 +147,6 @@ class Transformer:
         '''
         with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE):
             # assume x: [batch_size, time, width, height, measurement]
-            # src_masks ?
-            src_masks = tf.math.equal(x, 0)  # (N, T1)-->[batch_size, time, loc, measurement]
-
             # embedding
             enc = self.embedding_module(x, encode_phase=True)   # [b, t, m, f]
 
@@ -162,7 +163,6 @@ class Transformer:
                                               values=enc,
                                               att_unit=(self.hp.vunits, self.hp.Tunits, self.hp.Munits),
                                               value_attr=(self.hp.V_kernel, self.hp.V_stride),
-                                              key_masks=src_masks,
                                               num_heads=self.hp.num_heads,
                                               dropout_rate=self.hp.dropout_rate,
                                               training=training,
@@ -170,9 +170,9 @@ class Transformer:
                     # feed forward
                     enc = ff(enc, num_units=[self.hp.d_ff, self.hp.d_model])
         memory = enc
-        return memory, src_masks
+        return memory
 
-    def decode(self, ys, memory, src_masks, training=True):
+    def decode(self, ys, memory, training=True):
         '''
         memory: encoder outputs. (N, T1, d_model)
         src_masks: (N, T1)
@@ -187,9 +187,6 @@ class Transformer:
             # assume decoder_inputs: [batch_size, time, width, height, measurement]
             # assume y(label): [batch_size, time, width, height, measurement] all predictors
             decoder_inputs, y = ys
-
-            # tgt_masks ?
-            tgt_masks = tf.math.equal(decoder_inputs, 0)  # (N, T2)-->[batch_size, time, loc, measurement]
 
             # embedding
             dec = self.embedding_module(decoder_inputs, encode_phase=False)  # [b, t, m, f]
@@ -207,7 +204,6 @@ class Transformer:
                                               values=dec,
                                               att_unit=(self.hp.vunits, self.hp.Tunits, self.hp.Munits),
                                               value_attr=(self.hp.V_kernel, self.hp.V_stride),
-                                              key_masks=tgt_masks,
                                               num_heads=self.hp.num_heads,
                                               dropout_rate=self.hp.dropout_rate,
                                               training=training,
@@ -220,7 +216,6 @@ class Transformer:
                                               values=memory,
                                               att_unit=(self.hp.vunits, self.hp.Tunits, self.hp.Munits),
                                               value_attr=(self.hp.V_kernel, self.hp.V_stride),
-                                              key_masks=src_masks,
                                               num_heads=self.hp.num_heads,
                                               dropout_rate=self.hp.dropout_rate,
                                               training=training,
@@ -228,12 +223,11 @@ class Transformer:
                                               scope="vanilla_attention")
                     # Feed Forward
                     dec = ff(dec, num_units=[self.hp.d_ff, self.hp.d_model])  # (b, t, m, d_model)
-            y_hat = self.restore_module(dec)
+            y_hat = self.restore_module(dec)   # (b, t, w, h, f)
         # # Final linear projection (embedding weights are shared)
         # weights = tf.transpose(self.embeddings)  # (d_model, vocab_size)
         # logits = tf.einsum('ntd,dk->ntk', dec, weights)  # (N, T2, vocab_size)
         # y_hat = tf.to_int32(tf.argmax(logits, axis=-1))
-
         return y_hat, y
 
     def train(self, x, ys):
@@ -245,8 +239,10 @@ class Transformer:
         summaries: training summary node
         '''
         # forward
-        memory, src_masks = self.encode(x)
-        preds, y = self.decode(ys, memory, src_masks)
+        inputs = Input(shape=(12, 320, 640, 1))
+        memory = self.encode(inputs)
+        preds, y = self.decode((inputs, inputs), memory)   # (b, t, w, h, m)
+        # model = Model(inputs, preds)
 
         # train scheme
         y_ = label_smoothing(tf.one_hot(y, depth=self.hp.vocab_size))
@@ -305,9 +301,12 @@ class Transformer:
 if __name__ == '__main__':
     from hparams import Hparams
 
-    x = tf.convert_to_tensor(np.random.rand(3, 4, 12, 320, 640, 1))
+    x, y = tf.convert_to_tensor(np.random.rand(4, 12, 320, 640, 3)), tf.convert_to_tensor(np.random.rand(4, 12, 320, 640, 3))
     x = tf.cast(x, 'float32')
+    y = tf.cast(y, 'float32')
+    ys = (y, y)
     hparams = Hparams()
     parser = hparams.parser
     hp = parser.parse_args()
     m = Transformer(hp)
+    m.train(x, ys)

@@ -36,11 +36,13 @@ class Hparams:
     parser.add_argument('--num_epochs', default=20, type=int)
     parser.add_argument('--evaldir', default="eval/1", help="evaluation dir")
 
-    # spatial extract
-    parser.add_argument('--conv_hidden', default=[2, 4, 8, 16, 32])
-    parser.add_argument('--conv_kernel', default=3)
     # model
-    parser.add_argument('--d_model', default=512, type=int,
+    parser.add_argument('--vunits', default=128)
+    parser.add_argument('--Tunits', default=8)
+    parser.add_argument('--Munits', default=8)
+    parser.add_argument('--V_kernel', default=3)
+    parser.add_argument('--V_stride', default=1)
+    parser.add_argument('--d_model', default=1024, type=int,
                         help="hidden dimension of encoder/decoder")
     parser.add_argument('--d_ff', default=2048, type=int,
                         help="hidden dimension of feedforward layer")
