@@ -46,48 +46,48 @@ class Transformer:
 
     def embedding_module(self, inputs, encode_phase):
         # inputs: [batch_size, time, w, h, predictor]
-        time, predictors = self.hp.in_seqlen, self.hp.num_predictor
-        # batch, time, w, h = inputs.get_shape().as_list()[0:4]
-        # inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)   # (predictor, batch, time, w, h, 1)
+        T = inputs.get_shape().as_list()[1]
+        predictors = self.hp.num_predictor
+        inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)   # (predictor, batch, time, w, h, 1)
         embeddings = []
         # in_layers, out_layers = [], []
         for i in range(predictors):
             # inputs = Input(shape=(time, 320, 640, 1))
             conv_out = TimeDistributed(tf.layers.Conv2D(filters=2, kernel_size=3, padding='same', activation=LeakyReLU()),
-                                       input_shape=(12, 320, 640, 1))(inputs)  # (b, t, 320, 640, f1)
+                                       input_shape=(T, 320, 640, 1))(inputs[i])  # (b, t, 320, 640, f1)
             pool_out = TimeDistributed(tf.layers.MaxPooling2D(pool_size=2, strides=2))(conv_out)  # (b, t, 160, 320, f1)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(pool_out)
             if encode_phase:
-                alpha = conv_attention_layer(Reshape((time, 160*320*2))(bn_out), k=16)
+                alpha = conv_attention_layer(Reshape((T, 160*320*2))(bn_out), k=16)
                 self.skip_layer_feature_maps_1.append(Reshape((160, 320, 2))(
-                    weighted_sum_block(info=Reshape((time, 160 * 320 * 2))(bn_out), alpha=alpha, time_len=time))) # (b, 160, 320, f1)
+                    weighted_sum_block(info=Reshape((T, 160 * 320 * 2))(bn_out), alpha=alpha, time_len=T))) # (b, 160, 320, f1)
 
             conv_out = TimeDistributed(tf.layers.Conv2D(filters=4, kernel_size=3, padding='same', activation=LeakyReLU()))(bn_out)
             pool_out = TimeDistributed(tf.layers.MaxPooling2D(pool_size=2, strides=2))(conv_out)   # (b, t, 80, 160, f2)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(pool_out)
             if encode_phase:
-                alpha = conv_attention_layer(Reshape((time, 80*160*4))(bn_out), k=16)
+                alpha = conv_attention_layer(Reshape((T, 80*160*4))(bn_out), k=16)
                 self.skip_layer_feature_maps_2.append(Reshape((80, 160, 4))(
-                        weighted_sum_block(info=Reshape((time, 80 * 160 * 4))(bn_out), alpha=alpha, time_len=time))) # (b, 80, 160, f2)
+                        weighted_sum_block(info=Reshape((T, 80 * 160 * 4))(bn_out), alpha=alpha, time_len=T))) # (b, 80, 160, f2)
 
             conv_out = TimeDistributed(tf.layers.Conv2D(filters=8, kernel_size=3, padding='same', activation=LeakyReLU()))(bn_out)
             pool_out = TimeDistributed(tf.layers.MaxPooling2D(pool_size=2, strides=2))(conv_out)  # (b, t, 40, 80, f3)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(pool_out)
             if encode_phase:
-                alpha = conv_attention_layer(Reshape((time, 40*80*8))(bn_out), k=16)
+                alpha = conv_attention_layer(Reshape((T, 40*80*8))(bn_out), k=16)
                 self.skip_layer_feature_maps_3.append(Reshape((40, 80, 8))(
-                        weighted_sum_block(info=Reshape((time, 40 * 80 * 8))(bn_out), alpha=alpha, time_len=time)))  # (b, 40, 80, f3)
+                        weighted_sum_block(info=Reshape((T, 40 * 80 * 8))(bn_out), alpha=alpha, time_len=T)))  # (b, 40, 80, f3)
 
             conv_out = TimeDistributed(tf.layers.Conv2D(filters=16, kernel_size=3, padding='same', activation=LeakyReLU()))(bn_out)
             pool_out = TimeDistributed(tf.layers.MaxPooling2D(pool_size=2, strides=2))(conv_out)   # (b, t, 20, 40, f4)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(pool_out)
             if encode_phase:
-                alpha = conv_attention_layer(Reshape((time, 20*40*16))(bn_out), k=16)
+                alpha = conv_attention_layer(Reshape((T, 20*40*16))(bn_out), k=16)
                 self.skip_layer_feature_maps_4.append(Reshape((20, 40, 16))(
-                        weighted_sum_block(info=Reshape((time, 20 * 40 * 16))(bn_out), alpha=alpha, time_len=time)))  # (b, 20, 40, f4)
+                        weighted_sum_block(info=Reshape((T, 20 * 40 * 16))(bn_out), alpha=alpha, time_len=T)))  # (b, 20, 40, f4)
 
             out = TimeDistributed(tf.layers.Conv2D(filters=32, kernel_size=5, strides=5, activation=LeakyReLU()))(bn_out)  # (b, t, 4, 8, f5)
-            out_feature = Reshape((time, 4*8*32))(out)  # (b, t, 4*8*f3)
+            out_feature = Reshape((T, 4*8*32))(out)  # (b, t, 4*8*f3)
             embeddings.append(out_feature)
             # in_layers.append(inputs)
             # out_layers.append(out_feature)
@@ -98,8 +98,9 @@ class Transformer:
 
     def restore_module(self, inputs):
         # assume inputs: (b, t, m, d_model)
-        time, predictors = self.hp.out_seqlen, self.hp.num_predictor
-        inputs = Reshape((time, 4, 8, 32, predictors))(inputs)
+        T = inputs.get_shape().as_list()[1]
+        predictors = self.hp.num_predictor
+        inputs = Reshape((T, 4, 8, 32, predictors))(inputs)
         inputs = tf.transpose(inputs, [5, 0, 1, 2, 3, 4])
         outputs = []
         # in_layers, out_layers = [], []
@@ -108,25 +109,25 @@ class Transformer:
             # inputs = Input(shape=(time, 4, 8, 32))
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=16, kernel_size=5, strides=5, activation=LeakyReLU()))(inputs=inputs[i])
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(deconv_out)
-            skip_layer_4 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_4[i], 1), [1, time, 1, 1, 1])
+            skip_layer_4 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_4[i], 1), [1, T, 1, 1, 1])
             deconv_out = Concatenate()([skip_layer_4, bn_out])   # (b, t, 20, 40, f4)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=8, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
-            skip_layer_3 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_3[i], 1), [1, time, 1, 1, 1])
+            skip_layer_3 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_3[i], 1), [1, T, 1, 1, 1])
             deconv_out = Concatenate()([skip_layer_3, bn_out])   # (b, t, 40, 80, f3)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=4, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
-            skip_layer_2 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_2[i], 1), [1, time, 1, 1, 1])
+            skip_layer_2 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_2[i], 1), [1, T, 1, 1, 1])
             deconv_out = Concatenate()([skip_layer_2, bn_out])   # (b, t, 80, 160, f2)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=2, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
             up_sampling_out = TimeDistributed(UpSampling2D(size=2))(deconv_out)
             bn_out = TimeDistributed(tf.layers.BatchNormalization())(up_sampling_out)
-            skip_layer_1 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_1[i], 1), [1, time, 1, 1, 1])
+            skip_layer_1 = tf.tile(tf.expand_dims(self.skip_layer_feature_maps_1[i], 1), [1, T, 1, 1, 1])
             deconv_out = Concatenate()([skip_layer_1, bn_out])  # (b, t, 160, 320, f1)
 
             deconv_out = TimeDistributed(tf.layers.Conv2DTranspose(filters=1, kernel_size=3, padding='same', activation=LeakyReLU()))(deconv_out)
@@ -239,16 +240,13 @@ class Transformer:
         summaries: training summary node
         '''
         # forward
-        inputs = Input(shape=(12, 320, 640, 1))
-        memory = self.encode(inputs)
-        preds, y = self.decode((inputs, inputs), memory)   # (b, t, w, h, m)
+        # inputs = Input(shape=(12, 320, 640, 1))
+        memory = self.encode(x)
+        preds, y = self.decode(ys, memory)   # (b, t, w, h, m)
         # model = Model(inputs, preds)
 
         # train scheme
-        y_ = label_smoothing(tf.one_hot(y, depth=self.hp.vocab_size))
-        ce = tf.nn.softmax_cross_entropy_with_logits_v2(logits=logits, labels=y_)
-        nonpadding = tf.to_float(tf.not_equal(y, self.token2idx["<pad>"]))  # 0: <pad>
-        loss = tf.reduce_sum(ce * nonpadding) / (tf.reduce_sum(nonpadding) + 1e-7)
+        loss = tf.reduce_mean(tf.square(y - preds))
 
         global_step = tf.train.get_or_create_global_step()
         lr = noam_scheme(self.hp.lr, global_step, self.hp.warmup_steps)
@@ -269,30 +267,28 @@ class Transformer:
         Returns
         y_hat: (N, T2)
         '''
-        decoder_inputs, y, y_seqlen, sents2 = ys
+        decoder_inputs, y = ys
 
-        decoder_inputs = tf.ones((tf.shape(xs[0])[0], 1), tf.int32) * self.token2idx["<s>"]
-        ys = (decoder_inputs, y, y_seqlen, sents2)
+        decoder_inputs = tf.ones((tf.shape(xs[0])[0], 1, self.hp.width, self.hp.height, self.hp.num_predictor), tf.float32)
+        ys = (decoder_inputs, y)
 
-        memory, src_masks = self.encode(xs, False)
+        memory = self.encode(xs, False)
 
         logging.info("Inference graph is being built. Please be patient.")
-        for _ in tqdm(range(self.hp.maxlen2)):
-            y_hat, y = self.decode(ys, memory, src_masks, False)
-            if tf.reduce_sum(y_hat, 1) == self.token2idx["<pad>"]: break
-
+        for _ in tqdm(range(self.hp.out_seqlen)):
+            y_hat, y = self.decode(ys, memory, False)
             _decoder_inputs = tf.concat((decoder_inputs, y_hat), 1)
-            ys = (_decoder_inputs, y, y_seqlen, sents2)
+            ys = (_decoder_inputs, y)
 
-        # monitor a random sample
-        n = tf.random_uniform((), 0, tf.shape(y_hat)[0] - 1, tf.int32)
-        sent1 = sents1[n]
-        pred = convert_idx_to_token_tensor(y_hat[n], self.idx2token)
-        sent2 = sents2[n]
+        # # monitor a random sample
+        # n = tf.random_uniform((), 0, tf.shape(y_hat)[0] - 1, tf.int32)
+        # sent1 = sents1[n]
+        # pred = convert_idx_to_token_tensor(y_hat[n], self.idx2token)
+        # sent2 = sents2[n]
 
-        tf.summary.text("sent1", sent1)
-        tf.summary.text("pred", pred)
-        tf.summary.text("sent2", sent2)
+        # tf.summary.text("sent1", sent1)
+        # tf.summary.text("pred", pred)
+        # tf.summary.text("sent2", sent2)
         summaries = tf.summary.merge_all()
 
         return y_hat, summaries

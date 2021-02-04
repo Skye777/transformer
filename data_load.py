@@ -11,6 +11,7 @@ For example, fpath1, fpath2 means source file path and target file path, respect
 '''
 import tensorflow as tf
 from utils import calc_num_batches
+import numpy as np
 
 
 def load_vocab(vocab_fpath):
@@ -68,7 +69,7 @@ def encode(inp, type, dict):
     return x
 
 
-def generator_fn(sents1, sents2, vocab_fpath):
+def generator_fn():
     '''Generates training / evaluation data
     sents1: list of source sents
     sents2: list of target sents
@@ -85,17 +86,12 @@ def generator_fn(sents1, sents2, vocab_fpath):
         y_seqlen: int. sequence length of y
         sent2: str. target sentence
     '''
-    token2idx, _ = load_vocab(vocab_fpath)
-    for sent1, sent2 in zip(sents1, sents2):
-        x = encode(sent1, "x", token2idx)
-        y = encode(sent2, "y", token2idx)
-        decoder_input, y = y[:-1], y[1:]
-
-        x_seqlen, y_seqlen = len(x), len(y)
-        yield (x, x_seqlen, sent1), (decoder_input, y, y_seqlen, sent2)
+    train_x, train_y = np.random.rand(10, 12, 320, 640, 3), np.random.rand(10, 12, 320, 640, 3)
+    for x, y in zip(train_x, train_y):
+        yield x, (y, y)
 
 
-def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
+def input_fn(batch_size, shuffle=False):
     '''Batchify data
     sents1: list of source sents
     sents2: list of target sents
@@ -114,28 +110,23 @@ def input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=False):
         y_seqlen: int32 tensor. (N, )
         sents2: str tensor. (N,)
     '''
-    shapes = (([None], (), ()),
-              ([None], [None], (), ()))
-    types = ((tf.int32, tf.int32, tf.string),
-             (tf.int32, tf.int32, tf.int32, tf.string))
-    paddings = ((0, 0, ''),
-                (0, 0, 0, ''))
+    types = (tf.float32,
+             (tf.float32, tf.float32))
 
     dataset = tf.data.Dataset.from_generator(generator_fn,
-                                             output_shapes=shapes,
                                              output_types=types,
-                                             args=(sents1, sents2, vocab_fpath))  # <- arguments for generator_fn. converted to np string arrays
+                                             args=())  # <- arguments for generator_fn. converted to np string arrays
 
     if shuffle:  # for training
         dataset = dataset.shuffle(128 * batch_size)
 
     dataset = dataset.repeat()  # iterate forever
-    dataset = dataset.padded_batch(batch_size, shapes, paddings).prefetch(1)
+    dataset = dataset.batch(batch_size).prefetch(1)
 
     return dataset
 
 
-def get_batch(fpath1, fpath2, maxlen1, maxlen2, vocab_fpath, batch_size, shuffle=False):
+def get_batch(batch_size, shuffle=False):
     '''Gets training / evaluation mini-batches
     fpath1: source file path. string.
     fpath2: target file path. string.
@@ -150,7 +141,11 @@ def get_batch(fpath1, fpath2, maxlen1, maxlen2, vocab_fpath, batch_size, shuffle
     num_batches: number of mini-batches
     num_samples
     '''
-    sents1, sents2 = load_data(fpath1, fpath2, maxlen1, maxlen2)
-    batches = input_fn(sents1, sents2, vocab_fpath, batch_size, shuffle=shuffle)
-    num_batches = calc_num_batches(len(sents1), batch_size)
-    return batches, num_batches, len(sents1)
+    # sents1, sents2 = load_data(fpath1, fpath2, maxlen1, maxlen2)
+    batches = input_fn(batch_size, shuffle=shuffle)
+    num_batches = calc_num_batches(10, batch_size)
+    return batches, num_batches, 10
+
+
+if __name__ == '__main__':
+    generator_fn()

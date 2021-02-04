@@ -25,6 +25,8 @@ class Hparams:
     # data
     parser.add_argument('--in_seqlen', default=12)
     parser.add_argument('--out_seqlen', default=12)
+    parser.add_argument('--width', default=640)
+    parser.add_argument('--height', default=320)
     parser.add_argument('--num_predictor', default=3)
     # training scheme
     parser.add_argument('--batch_size', default=4, type=int)

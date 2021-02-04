@@ -26,13 +26,11 @@ hp = parser.parse_args()
 save_hparams(hp, hp.logdir)
 
 logging.info("# Prepare train/eval batches")
-train_batches, num_train_batches, num_train_samples = get_batch(hp.train1, hp.train2, hp.maxlen1, hp.maxlen2,
-                                                                hp.vocab, hp.batch_size, shuffle=True)
-eval_batches, num_eval_batches, num_eval_samples = get_batch(hp.eval1, hp.eval2, 100000, 100000,
-                                                             hp.vocab, hp.batch_size, shuffle=False)
+train_batches, num_train_batches, num_train_samples = get_batch(hp.batch_size, shuffle=True)
+eval_batches, num_eval_batches, num_eval_samples = get_batch(hp.batch_size, shuffle=False)
 
 # create a iterator of the correct shape and type
-iter = tf.data.Iterator.from_structure(train_batches.output_types, train_batches.output_shapes)
+iter = tf.data.Iterator.from_structure(train_batches.output_types)
 xs, ys = iter.get_next()
 
 train_init_op = iter.make_initializer(train_batches)
@@ -73,18 +71,18 @@ with tf.Session() as sess:
             _, _eval_summaries = sess.run([eval_init_op, eval_summaries])
             summary_writer.add_summary(_eval_summaries, _gs)
 
-            logging.info("# get hypotheses")
-            hypotheses = get_hypotheses(num_eval_batches, num_eval_samples, sess, y_hat, m.idx2token)
+            # logging.info("# get hypotheses")
+            # hypotheses = get_hypotheses(num_eval_batches, num_eval_samples, sess, y_hat, m.idx2token)
 
             logging.info("# write results")
             model_output = "iwslt2016_E%02dL%.2f" % (epoch, _loss)
-            if not os.path.exists(hp.evaldir): os.makedirs(hp.evaldir)
-            translation = os.path.join(hp.evaldir, model_output)
-            with open(translation, 'w') as fout:
-                fout.write("\n".join(hypotheses))
+            # if not os.path.exists(hp.evaldir): os.makedirs(hp.evaldir)
+            # translation = os.path.join(hp.evaldir, model_output)
+            # with open(translation, 'w') as fout:
+            #     fout.write("\n".join(hypotheses))
 
-            logging.info("# calc bleu score and append it to translation")
-            calc_bleu(hp.eval3, translation)
+            # logging.info("# calc bleu score and append it to translation")
+            # calc_bleu(hp.eval3, translation)
 
             logging.info("# save models")
             ckpt_name = os.path.join(hp.logdir, model_output)
