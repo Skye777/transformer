@@ -23,8 +23,8 @@ class Hparams:
     parser.add_argument('--vocab', default='iwslt2016/segmented/bpe.vocab',
                         help="vocabulary file path")
     # data
-    parser.add_argument('--in_seqlen', default=12)
-    parser.add_argument('--out_seqlen', default=12)
+    parser.add_argument('--in_seqlen', default=3)
+    parser.add_argument('--out_seqlen', default=3)
     parser.add_argument('--width', default=640)
     parser.add_argument('--height', default=320)
     parser.add_argument('--num_predictor', default=3)
@@ -39,9 +39,11 @@ class Hparams:
     parser.add_argument('--evaldir', default="eval/1", help="evaluation dir")
 
     # model
+    parser.add_argument('--model_structure', default="Joint")
     parser.add_argument('--vunits', default=128)
     parser.add_argument('--Tunits', default=8)
     parser.add_argument('--Munits', default=8)
+    parser.add_argument('--MTunits', default=8)
     parser.add_argument('--V_kernel', default=3)
     parser.add_argument('--V_stride', default=1)
     parser.add_argument('--d_model', default=1024, type=int,

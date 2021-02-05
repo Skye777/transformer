@@ -98,46 +98,60 @@ def mask(inputs, type=None):
     return outputs
 
 
-def cross_attention(Q, K, V, att_unit, causality=False, scope="cross_attention"):
+def cross_attention(Q, K, V, att_unit, time, model_structure, causality=False, scope="cross_attention"):
     '''mask is applied before the softmax layer, no dropout is applied, '''
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         # batch_size*num_heads
         segs = tf.shape(V)[0]
-        time, measure = Q[0].get_shape().as_list()[1], Q[1].get_shape().as_list()[1]
-        (value_units, Tunits, Munits) = att_unit
-
-        (Q_T, Q_M) = Q
-        (K_T, K_M) = K
-
-        # Check the dimension consistency of the combined matrix
-        assert Q_T.get_shape().as_list()[1:] == K_T.get_shape().as_list()[1:]
-        assert Q_M.get_shape().as_list()[1:] == K_M.get_shape().as_list()[1:]
-        assert Q_T.get_shape().as_list()[0] == Q_M.get_shape().as_list()[0]
-        assert K_T.get_shape().as_list()[0] == K_M.get_shape().as_list()[0]
-
-        # Build the Attention Map and scale
-        AM_Time = tf.matmul(Q_T, tf.transpose(K_T, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, T, T)
-        AM_Measure = tf.matmul(Q_M, tf.transpose(K_M, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, M, M)
-
-        # causality or future blinding masking for decoder
-        if causality:
-            AM_Time = mask(AM_Time, type="future")
-
-        AM_Time = tf.nn.softmax(AM_Time)
-        AM_Measure = tf.nn.softmax(AM_Measure)
+        (value_units, MT_units, Tunits, Munits) = att_unit
+        measure = V.get_shape().as_list()[2]
 
         shape_time = [segs, time, measure, value_units]
         shape_measure = [segs, measure, time, value_units]
 
-        # decomposed manner in CDSA
-        Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, measure*value_units])), shape_time)
-        Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3])
-        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, time*value_units])), shape_measure)
-    return tf.transpose(Out_Time_M, perm=[0, 2, 1, 3])
+        if model_structure == 'Decomposed':
+            (Q_T, Q_M) = Q
+            (K_T, K_M) = K
+
+            # Check the dimension consistency of the combined matrix
+            assert Q_T.get_shape().as_list()[1:] == K_T.get_shape().as_list()[1:]
+            assert Q_M.get_shape().as_list()[1:] == K_M.get_shape().as_list()[1:]
+            assert Q_T.get_shape().as_list()[0] == Q_M.get_shape().as_list()[0]
+            assert K_T.get_shape().as_list()[0] == K_M.get_shape().as_list()[0]
+
+            # Build the Attention Map and scale
+            AM_Time = tf.matmul(Q_T, tf.transpose(K_T, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, T, T)
+            AM_Measure = tf.matmul(Q_M, tf.transpose(K_M, [0, 2, 1])) / tf.sqrt(tf.cast(Tunits, tf.float32))  # (N*h, M, M)
+
+            # causality or future blinding masking for decoder
+            if causality:
+                AM_Time = mask(AM_Time, type="future")
+
+            AM_Time = tf.nn.softmax(AM_Time)
+            AM_Measure = tf.nn.softmax(AM_Measure)
+
+            # decomposed manner in CDSA
+            Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, measure*value_units])), shape_time)
+            Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3])
+            Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, time*value_units])), shape_measure)
+            Outputs = tf.transpose(Out_Time_M, perm=[0, 2, 1, 3])
+
+        else:
+            AM = tf.matmul(Q, tf.transpose(K, [0, 2, 1])) / tf.sqrt(tf.cast(MT_units, tf.float32))  # (N*h, T*M, T*M)
+
+            # causality or future blinding masking for decoder
+            if causality:
+                AM = mask(AM, type="future")
+
+            AM = tf.nn.softmax(AM)
+            Outputs = tf.reshape(tf.matmul(AM, tf.reshape(V, [segs, time*measure, value_units])), shape_time)
+
+    return Outputs
 
 
-def multihead_attention(queries, keys, values, att_unit, value_attr,
+def multihead_attention(queries, keys, values, att_unit, value_attr, time,
                         num_heads=8,
+                        model_structure='Joint',
                         dropout_rate=0,
                         training=True,
                         causality=False,
@@ -160,38 +174,49 @@ def multihead_attention(queries, keys, values, att_unit, value_attr,
     '''
     # assume input: [batch_size, time, measurement, feature]
     # d_model = queries.get_shape().as_list()[-1]
-    (value_units, Tunits, Munits) = att_unit
+    (value_units, MT_units, Tunits, Munits) = att_unit
     V_filters, (V_kernel, V_stride) = value_units * num_heads, value_attr
     batch = tf.shape(queries)[0]
-    time, measure, feature = queries.get_shape().as_list()[1:]
+    measure, feature = queries.get_shape().as_list()[2:]
 
     with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
-        # Linear projections
-        Q_time = tf.layers.dense(tf.reshape(queries, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True,
-                                 name='Q_Time')
-        K_time = tf.layers.dense(tf.reshape(keys, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True, name='K_Time')
-        Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, time*feature]),
-                              num_heads * Munits, use_bias=True, name='Q_M')
-        K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, time*feature]), num_heads * Munits,
-                              use_bias=True, name='K_M')
-        # same shape with inputs [batch_size, time, measurement, feature]
-        V = tf.layers.conv2d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
-                             data_format="channels_last", name='V')
+        if model_structure == 'Decomposed':
+            # Linear projections
+            Q_time = tf.layers.dense(tf.reshape(queries, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True,
+                                     name='Q_Time')
+            K_time = tf.layers.dense(tf.reshape(keys, [batch, time, measure*feature]), num_heads * Tunits, use_bias=True, name='K_Time')
+            Q_m = tf.layers.dense(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, time*feature]),
+                                  num_heads * Munits, use_bias=True, name='Q_M')
+            K_m = tf.layers.dense(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, time*feature]), num_heads * Munits,
+                                  use_bias=True, name='K_M')
+            # same shape with inputs [batch_size, time, measurement, feature]
+            V = tf.layers.conv2d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
+                                 data_format="channels_last", name='V')
 
-        # Split and concat
-        # Split the matrix to multiple heads and then concatenate to build a larger batch size:
-        Qhb_time = tf.concat(tf.split(Q_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
-        Khb_time = tf.concat(tf.split(K_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
-        Qhb_m = tf.concat(tf.split(Q_m, num_heads, axis=2), axis=0)
-        Khb_m = tf.concat(tf.split(K_m, num_heads, axis=2), axis=0)
-        Q_headbatch = (Qhb_time, Qhb_m)
-        K_headbatch = (Khb_time, Khb_m)
+            # Split and concat
+            # Split the matrix to multiple heads and then concatenate to build a larger batch size:
+            Qhb_time = tf.concat(tf.split(Q_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
+            Khb_time = tf.concat(tf.split(K_time, num_heads, axis=2), axis=0)  # (h*N, T, Tunits)
+            Qhb_m = tf.concat(tf.split(Q_m, num_heads, axis=2), axis=0)
+            Khb_m = tf.concat(tf.split(K_m, num_heads, axis=2), axis=0)
+            Q_headbatch = (Qhb_time, Qhb_m)
+            K_headbatch = (Khb_time, Khb_m)
 
-        # [batch_size*num_heads, time, measurement, value_units]
-        V_headbatch = tf.concat(tf.split(V, num_heads, axis=3), axis=0)
+            # [batch_size*num_heads, time, measurement, value_units]
+            V_headbatch = tf.concat(tf.split(V, num_heads, axis=3), axis=0)
 
+        else:
+            Q = tf.layers.dense(tf.reshape(queries, [batch, time*measure, feature]), num_heads * MT_units, use_bias=True, name='Q')
+            K = tf.layers.dense(tf.reshape(keys, [batch, time*measure, feature]), num_heads * MT_units, use_bias=True, name='K')
+            # same shape with inputs [batch_size, time, measurement, feature]
+            V = tf.layers.conv2d(inputs=values, filters=V_filters, kernel_size=V_kernel, strides=V_stride, padding='same',
+                                 data_format="channels_last", name='V')
+
+            Q_headbatch = tf.concat(tf.split(Q, num_heads, axis=2), axis=0)
+            K_headbatch = tf.concat(tf.split(K, num_heads, axis=2), axis=0)
+            V_headbatch = tf.concat(tf.split(V, num_heads, axis=3), axis=0)
         # Attention
-        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, att_unit, causality)
+        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, att_unit, time, model_structure, causality)
 
         # Merge the multi-head back to the original shape
         # [batch_size, time, measurement, filters]
@@ -310,13 +335,13 @@ def positional_encoding(inputs,
         return tf.to_float(outputs)
 
 
-def auxiliary_encode(inputs):
+def auxiliary_encode(inputs, T):
     # inputs: [batch_size, time, loc, measurement, 1]
     # outputs: [batch_size, time, loc, measurement, 1]
     # inputs: [b, t, m, f]
     # outputs: [b, t, m, f]
     N = tf.shape(inputs)[0]
-    T, M, F = inputs.get_shape().as_list()[1:4]
+    M, F = inputs.get_shape().as_list()[2:4]
     with tf.variable_scope('auxiliary_encode'):
         denom = tf.constant(1000.0)
         phase = tf.linspace(0.0, T - 1.0, T) * tf.constant(math.pi / 180.0) / denom
