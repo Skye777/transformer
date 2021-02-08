@@ -221,7 +221,7 @@ filelist = [
     'pgrbanl/pgrbanl_mean_2014_TMP_sigma.grib']
 for file in filelist:
     filename = dspath + file
-    file_base = '..\\meta-data\\tmp\\' + os.path.basename(file)
+    file_base = '../meta-data/tmp/' + os.path.basename(file)
     print('Downloading', file_base)
     req = requests.get(filename, cookies=ret.cookies, allow_redirects=True, stream=True)
     filesize = int(req.headers['Content-length'])
