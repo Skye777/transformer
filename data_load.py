@@ -86,7 +86,7 @@ def generator_fn():
         y_seqlen: int. sequence length of y
         sent2: str. target sentence
     '''
-    train_x, train_y = np.random.rand(10, 12, 320, 640, 3), np.random.rand(10, 12, 320, 640, 3)
+    train_x, train_y = np.random.rand(10, 3, 320, 640, 3), np.random.rand(10, 3, 320, 640, 3)
     for x, y in zip(train_x, train_y):
         yield x, (y, y)
 

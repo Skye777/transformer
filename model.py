@@ -11,7 +11,6 @@ import tensorflow as tf
 from tensorflow.keras.layers import TimeDistributed, Reshape, LeakyReLU, Concatenate, UpSampling2D
 import numpy as np
 
-from data_load import load_vocab
 from modules import ff, conv_attention_layer, auxiliary_encode, multihead_attention, label_smoothing, noam_scheme, \
     weighted_sum_block
 from tqdm import tqdm
@@ -36,7 +35,6 @@ class Transformer:
 
     def __init__(self, hp):
         self.hp = hp
-        self.token2idx, self.idx2token = load_vocab(hp.vocab)
         self.skip_layer_feature_maps_1 = []
         self.skip_layer_feature_maps_2 = []
         self.skip_layer_feature_maps_3 = []
@@ -48,6 +46,7 @@ class Transformer:
         predictors = self.hp.num_predictor
         inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)   # (predictor, batch, time, w, h, 1)
         embeddings = []
+        a = tf.keras.layers.TimeDistributed
 
         for i in range(predictors):
             # inputs = Input(shape=(time, 320, 640, 1))
