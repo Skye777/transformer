@@ -4,8 +4,12 @@ class Hparams:
     parser = argparse.ArgumentParser()
 
     # prepro
-    parser.add_argument('--vocab_size', default=32000, type=int)
-
+    parser.add_argument('--reanalysis_dataset_dir', default='/home/dl/Public/Skye/transformer/data/reanalysis_data/')
+    parser.add_argument('--observe_dataset_dir', default='/home/dl/Public/Skye/transformer/data/observe_data/')
+    parser.add_argument('--reanalysis_npz_dir',
+                        default='/home/dl/Public/Skye/transformer/data/reanalysis_data/npz-data')
+    parser.add_argument('--observe_npz_dir',
+                        default='/home/dl/Public/Skye/transformer/data/observe_data/npz-data')
     # train
     ## files
     parser.add_argument('--train1', default='iwslt2016/segmented/train.de.bpe',

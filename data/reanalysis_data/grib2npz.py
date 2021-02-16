@@ -6,24 +6,25 @@ import os
 
 from progress.bar import PixelBar
 
-from train.params import *
+from hparams import Hparams
 
-dic = [f'{params.reanalysis_dataset_dir}/meta-data/cwat',
-       f'{params.reanalysis_dataset_dir}/meta-data/cape',
-       f'{params.reanalysis_dataset_dir}/meta-data/cin',
-       f'{params.reanalysis_dataset_dir}/meta-data/pot',
-       f'{params.reanalysis_dataset_dir}/meta-data/pres',
-       f'{params.reanalysis_dataset_dir}/meta-data/pwat',
-       f'{params.reanalysis_dataset_dir}/meta-data/rh',
-       f'{params.reanalysis_dataset_dir}/meta-data/tmp',
-       f'{params.reanalysis_dataset_dir}/meta-data/uwind',
-       f'{params.reanalysis_dataset_dir}/meta-data/vwind']
-final = params.reanalysis_npz_dir
+hparams = Hparams()
+parser = hparams.parser
+hp = parser.parse_args()
+
+dic = [
+       f'{hp.reanalysis_dataset_dir}/meta-data/cwat',
+       f'{hp.reanalysis_dataset_dir}/meta-data/pwat',
+       f'{hp.reanalysis_dataset_dir}/meta-data/rh',
+       f'{hp.reanalysis_dataset_dir}/meta-data/tmp',
+       f'{hp.reanalysis_dataset_dir}/meta-data/uwind',
+       f'{hp.reanalysis_dataset_dir}/meta-data/vwind']
+final = hp.reanalysis_npz_dir
 smonth = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 bmonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-def read_grib(path):
 
+def read_grib(path):
     print(f'Parsing parameter {str.split(path, "/")[-1]}')
     bar = PixelBar(r'Parsing', max=len(os.listdir(path)), suffix='%(percent)d%%')
 
@@ -54,6 +55,7 @@ def read_grib(path):
         year_record[year] = month_record
         bar.next()
     bar.finish()
+    print(year_record)
 
     reanalysis = []
     for i in range(1851, 2015):
@@ -66,6 +68,7 @@ def read_grib(path):
 def main():
     for i in dic:
         read_grib(i)
+
 
 if __name__ == "__main__":
     main()
