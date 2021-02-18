@@ -10,6 +10,10 @@ class Hparams:
                         default='/home/dl/Public/Skye/transformer/data/reanalysis_data/npz-data')
     parser.add_argument('--observe_npz_dir',
                         default='/home/dl/Public/Skye/transformer/data/observe_data/npz-data')
+    parser.add_argument('--reanalysis_preprocess_out_dir',
+                        default='/home/dl/Public/Skye/transformer/data/reanalysis_data/tfRecords')
+    parser.add_argument('--observe_preprocess_out_dir',
+                        default='/home/dl/Public/Skye/transformer/data/observe_data/tfRecords')
     # train
     ## files
     parser.add_argument('--train1', default='iwslt2016/segmented/train.de.bpe',
@@ -29,10 +33,13 @@ class Hparams:
     # data
     parser.add_argument('--in_seqlen', default=3)
     parser.add_argument('--out_seqlen', default=3)
-    parser.add_argument('--width', default=640)
-    parser.add_argument('--height', default=320)
+    parser.add_argument('--lead_time', default=1)
+    parser.add_argument('--width', default=320)
+    parser.add_argument('--height', default=160)
     parser.add_argument('--num_predictor', default=3)
     # training scheme
+    parser.add_argument('--train_eval_split', default=0.1)
+    parser.add_argument('--random_seed', default=2021)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--eval_batch_size', default=128, type=int)
 
