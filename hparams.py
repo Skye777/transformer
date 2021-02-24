@@ -1,5 +1,6 @@
 import argparse
 
+
 class Hparams:
     parser = argparse.ArgumentParser()
 
@@ -14,40 +15,30 @@ class Hparams:
                         default='/home/dl/Public/Skye/transformer/data/reanalysis_data/tfRecords')
     parser.add_argument('--observe_preprocess_out_dir',
                         default='/home/dl/Public/Skye/transformer/data/observe_data/tfRecords')
-    # train
-    ## files
-    parser.add_argument('--train1', default='iwslt2016/segmented/train.de.bpe',
-                             help="german training segmented data")
-    parser.add_argument('--train2', default='iwslt2016/segmented/train.en.bpe',
-                             help="english training segmented data")
-    parser.add_argument('--eval1', default='iwslt2016/segmented/eval.de.bpe',
-                             help="german evaluation segmented data")
-    parser.add_argument('--eval2', default='iwslt2016/segmented/eval.en.bpe',
-                             help="english evaluation segmented data")
-    parser.add_argument('--eval3', default='iwslt2016/prepro/eval.en',
-                             help="english evaluation unsegmented data")
 
-    ## vocabulary
-    parser.add_argument('--vocab', default='iwslt2016/segmented/bpe.vocab',
-                        help="vocabulary file path")
     # data
     parser.add_argument('--in_seqlen', default=3)
     parser.add_argument('--out_seqlen', default=3)
     parser.add_argument('--lead_time', default=1)
     parser.add_argument('--width', default=320)
     parser.add_argument('--height', default=160)
-    parser.add_argument('--num_predictor', default=3)
+    parser.add_argument('--num_predictor', default=5)
+    parser.add_argument('--input_variables', default=["sst", "uwind", "vwind", "sshg", "thflx"])
+    parser.add_argument('--output_variables', default=["sst", "uwind", "vwind", "sshg", "thflx"])
+
     # training scheme
     parser.add_argument('--train_eval_split', default=0.1)
     parser.add_argument('--random_seed', default=2021)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--eval_batch_size', default=128, type=int)
+    parser.add_argument('--num_epochs', default=20, type=int)
+    parser.add_argument('--num_epoch_record', default=1, help="Number of step to record checkpoint.")
 
+    parser.add_argument('--ckpt', default='', help="checkpoint file path")
+    parser.add_argument('--single_gpu_model_dir', default="ckpt/checkpoints_single")
     parser.add_argument('--lr', default=0.0003, type=float, help="learning rate")
     parser.add_argument('--warmup_steps', default=4000, type=int)
-    parser.add_argument('--logdir', default="log/1", help="log directory")
-    parser.add_argument('--num_epochs', default=20, type=int)
-    parser.add_argument('--evaldir', default="eval/1", help="evaluation dir")
+    parser.add_argument('--logdir', default="logs", help="log directory")
 
     # model
     parser.add_argument('--model_structure', default="Joint")
@@ -72,12 +63,3 @@ class Hparams:
     parser.add_argument('--dropout_rate', default=0.3, type=float)
     parser.add_argument('--smoothing', default=0.1, type=float,
                         help="label smoothing rate")
-
-    # test
-    parser.add_argument('--test1', default='iwslt2016/segmented/test.de.bpe',
-                        help="german test segmented data")
-    parser.add_argument('--test2', default='iwslt2016/prepro/test.en',
-                        help="english test data")
-    parser.add_argument('--ckpt', help="checkpoint file path")
-    parser.add_argument('--test_batch_size', default=128, type=int)
-    parser.add_argument('--testdir', default="test/1", help="test result dir")
