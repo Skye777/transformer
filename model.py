@@ -34,7 +34,14 @@ class UTransformer(tf.keras.Model):
                                d_model=hp.d_model,
                                drop_rate=hp.dropout_rate)
 
-    def call(self, inp, tar, training=None, mask=None):
+    def call(self, inputs, targets, training=None, mask=None):
+        inp, tar = [], []
+        for vrb in self.hp.input_variables:
+            inp.append(inputs[vrb])
+        for vrb in self.hp.output_variables:
+            tar.append(targets[vrb])
+        print(inp.shape)
+
         enc_output, skip_layers = self.encoder(inp, training)
 
         if training:
