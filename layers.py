@@ -45,6 +45,9 @@ class Decoder(tf.keras.layers.Layer):
 
     def call(self, x, enc_output, skip_layers, seq_len, training):
         x, _ = self.embedding(x)
+        if training is False:
+            print(x.shape)
+
         x += auxiliary_encode(x, T=seq_len)
         x = self.dropout(x, training=training)
 
@@ -119,6 +122,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
                  causality):
         super(MultiHeadAttention, self).__init__()
         self.num_heads = num_heads
+        self.att_unit = att_unit
         (self.value_units, self.MT_units, self.Tunits, self.Munits) = att_unit
         self.V_filters, (self.V_kernel, self.V_stride) = self.value_units * num_heads, value_attr
         self.model_structure = model_structure
@@ -138,13 +142,14 @@ class MultiHeadAttention(tf.keras.layers.Layer):
 
     def call(self, queries, keys, values):
         batch = tf.shape(queries)[0]
-        time, measure, feature = queries.get_shape().as_list()[1:]
+        q_t, k_t = queries.get_shape().as_list()[1], keys.get_shape().as_list()[1]
+        measure, feature = queries.get_shape().as_list()[2:]
         if self.model_structure == 'Decomposed':
             # Linear projections
-            Q_time = self.qt(tf.reshape(queries, [batch, time, measure * feature]))
-            K_time = self.kt(tf.reshape(keys, [batch, time, measure * feature]))
-            Q_m = self.qm(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, time * feature]))
-            K_m = self.km(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, time * feature]))
+            Q_time = self.qt(tf.reshape(queries, [batch, q_t, measure * feature]))
+            K_time = self.kt(tf.reshape(keys, [batch, k_t, measure * feature]))
+            Q_m = self.qm(tf.reshape(tf.transpose(queries, [0, 2, 1, 3]), [batch, measure, q_t * feature]))
+            K_m = self.km(tf.reshape(tf.transpose(keys, [0, 2, 1, 3]), [batch, measure, k_t * feature]))
             # same shape with inputs [batch_size, time, measurement, feature]
             V = self.v(values)
 
@@ -161,8 +166,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
             V_headbatch = tf.concat(tf.split(V, self.num_heads, axis=3), axis=0)
 
         else:
-            Q = self.qmt(tf.reshape(queries, [batch, time * measure, feature]))
-            K = self.kmt(tf.reshape(keys, [batch, time * measure, feature]))
+            Q = self.qmt(tf.reshape(queries, [batch, q_t * measure, feature]))
+            K = self.kmt(tf.reshape(keys, [batch, k_t * measure, feature]))
             # same shape with inputs [batch_size, time, measurement, feature]
             V = self.vmt(values)
 
@@ -170,7 +175,7 @@ class MultiHeadAttention(tf.keras.layers.Layer):
             K_headbatch = tf.concat(tf.split(K, self.num_heads, axis=2), axis=0)
             V_headbatch = tf.concat(tf.split(V, self.num_heads, axis=3), axis=0)
         # Attention
-        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, self.att_unit, time, self.model_structure,
+        outputs = cross_attention(Q_headbatch, K_headbatch, V_headbatch, self.att_unit, q_t, k_t, self.model_structure,
                                   self.causality)
 
         # Merge the multi-head back to the original shape
@@ -187,14 +192,14 @@ class Embedding(tf.keras.layers.Layer):
         self.num_predictor = num_predictor
         self.encode_phase = encode_phase
 
-        self.convblock1 = ConvMaxPoolBlock(filters=4, kernel_size=3, pool_size=2, strides=2, t=seq_len, w=160, h=80, c=4) # here t used only in encoder
-        self.convblock2 = ConvMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, w=80, h=40, c=8)
-        self.convblock3 = ConvMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, w=40, h=20, c=16)
+        self.convblock1 = ConvMaxPoolBlock(filters=4, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4) # here t used only in encoder
+        self.convblock2 = ConvMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
+        self.convblock3 = ConvMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
 
         self.conv2d = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(filters=32, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU()))
 
     def call(self, inputs):
-        # inputs: [batch_size, time, w, h, predictor]
+        # inputs: [batch_size, time, h, w, predictor]
         T = tf.shape(inputs)[1]
         inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)  # (predictor, batch, time, w, h, 1)
         embeddings = []
@@ -241,9 +246,9 @@ class Restore(tf.keras.layers.Layer):
 
         for i in range(self.num_predictor):
             deconv_out = self.bn(self.deconv(inputs[i]))
-            out = self.deconvblock1(deconv_out, skip_layers['predictor{}_map1'.format(i+1)])
+            out = self.deconvblock1(deconv_out, skip_layers['predictor{}_map3'.format(i+1)])
             out = self.deconvblock2(out, skip_layers['predictor{}_map2'.format(i+1)])
-            out = self.deconvblock3(out, skip_layers['predictor{}_map3'.format(i+1)])
+            out = self.deconvblock3(out, skip_layers['predictor{}_map1'.format(i+1)])
             outputs.append(out)
         outputs = tf.keras.layers.Concatenate()(outputs)
         return outputs
@@ -271,15 +276,15 @@ class ConvTransBlock(tf.keras.layers.Layer):
 
 
 class ConvMaxPoolBlock(tf.keras.layers.Layer):
-    def __init__(self, filters, kernel_size, pool_size, strides, t, w, h, c):
+    def __init__(self, filters, kernel_size, pool_size, strides, t, h, w, c):
         super(ConvMaxPoolBlock, self).__init__()
         self.conv = tf.keras.layers.TimeDistributed(
             tf.keras.layers.Conv2D(filters=filters, kernel_size=kernel_size, padding='same',
                                    activation=tf.keras.layers.LeakyReLU()))
         self.max_pool = tf.keras.layers.TimeDistributed(tf.keras.layers.MaxPool2D(pool_size=pool_size, strides=strides))
         self.bn = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization())
-        self.alpha = ConvAttention(t, w, h, c, k=16)
-        self.get_feature_maps = WeightedSumBlock(t, w, h, c)
+        self.alpha = ConvAttention(t, h, w, c, k=16)
+        self.get_feature_maps = WeightedSumBlock(t, h, w, c)
 
     def call(self, inputs, encode_phase):
         conv_out = self.conv(inputs)
@@ -294,7 +299,7 @@ class ConvMaxPoolBlock(tf.keras.layers.Layer):
 
 
 class ConvAttention(tf.keras.layers.Layer):
-    def __init__(self, l, w, h, c, k):
+    def __init__(self, l, h, w, c, k):
         super(ConvAttention, self).__init__()
         self.reshape = tf.keras.layers.Reshape((l, w*h*c))
         self.layer1 = tf.keras.layers.Dense(units=k, activation='tanh')
@@ -307,12 +312,12 @@ class ConvAttention(tf.keras.layers.Layer):
 
 
 class WeightedSumBlock(tf.keras.layers.Layer):
-    def __init__(self, l, w, h, c):
+    def __init__(self, l, h, w, c):
         super(WeightedSumBlock, self).__init__()
         self.l = l
         self.add = tf.keras.layers.Add()
         self.reshape1 = tf.keras.layers.Reshape((l, w*h*c))
-        self.reshape2 = tf.keras.layers.Reshape((w, h, c))
+        self.reshape2 = tf.keras.layers.Reshape((h, w, c))
 
     def call(self, inputs, alpha):
         inputs = self.reshape1(inputs)

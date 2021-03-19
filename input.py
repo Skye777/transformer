@@ -31,17 +31,24 @@ def parse_fn(example):
         outputs_list.append(tf.reshape(tf.io.decode_raw(parsed['output_'+vrb], tf.float32), [hp.out_seqlen, height, width, 1])[:, :, :, :])
     # print("inputs_list:", inputs_list)
     # print("outputs_list:", outputs_list)
+    # [time, h, w, predictor]
+    inputs_list = tf.transpose(tf.squeeze(inputs_list), [1, 2, 3, 0])
+    outputs_list = tf.transpose(tf.squeeze(outputs_list), [1, 2, 3, 0])
+    decoder_inp = tf.concat((tf.expand_dims(inputs_list[-1], 0), outputs_list[:-1]), axis=0)
 
-    input_features = {}
-    output_features = {}
-    for i, vrb in enumerate(hp.input_variables):
-        input_features[vrb] = inputs_list[i]
-    for i, vrb in enumerate(hp.output_variables):
-        output_features[vrb] = outputs_list[i]
+    x = inputs_list
+    ys = (decoder_inp, outputs_list)
+
+    # input_features = {}
+    # output_features = {}
+    # for i, vrb in enumerate(hp.input_variables):
+    #     input_features[vrb] = inputs_list[i]
+    # for i, vrb in enumerate(hp.output_variables):
+    #     output_features[vrb] = outputs_list[i]
     # print("input_feature:", input_features)
     # print("output_feature:", output_features)
 
-    return input_features, output_features
+    return x, ys
 
 
 def train_input_fn():

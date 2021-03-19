@@ -21,15 +21,15 @@ def mask(inputs):
     return outputs
 
 
-def cross_attention(Q, K, V, att_unit, time, model_structure, causality=False):
+def cross_attention(Q, K, V, att_unit, q_t, k_t, model_structure, causality=False):
     '''mask is applied before the softmax layer, no dropout is applied, '''
     # batch_size*num_heads
     segs = tf.shape(V)[0]
     (value_units, MT_units, Tunits, Munits) = att_unit
     measure = V.get_shape().as_list()[2]
 
-    shape_time = [segs, time, measure, value_units]
-    shape_measure = [segs, measure, time, value_units]
+    shape_time = [segs, q_t, measure, value_units]
+    shape_measure = [segs, measure, q_t, value_units]
 
     if model_structure == 'Decomposed':
         (Q_T, Q_M) = Q
@@ -66,7 +66,7 @@ def cross_attention(Q, K, V, att_unit, time, model_structure, causality=False):
             AM = mask(AM)
 
         AM = tf.nn.softmax(AM)
-        Outputs = tf.reshape(tf.matmul(AM, tf.reshape(V, [segs, time*measure, value_units])), shape_time)
+        Outputs = tf.reshape(tf.matmul(AM, tf.reshape(V, [segs, k_t*measure, value_units])), shape_time)
 
     return Outputs
 

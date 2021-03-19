@@ -38,11 +38,11 @@ def main():
     logger.add(f"{hp.logdir}/{hp.in_seqlen}_{hp.out_seqlen}_{hp.lead_time}_train.log", enqueue=True)
 
     for epoch in range(hp.num_epochs):
-        for step, (x_batch_train, y_batch_train) in enumerate(train_dataset):
+        for step, (x_batch_train, ys_batch_train) in enumerate(train_dataset):
             start = time.clock()
             with tf.GradientTape() as tape:
-                y_predict = model(x_batch_train, y_batch_train, training=True)
-                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, y_batch_train))
+                y_predict = model(x_batch_train, ys_batch_train, training=True)
+                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, ys_batch_train[1]))
             grads = tape.gradient(loss, model.trainable_weights)
             optimizer.apply_gradients(zip(grads, model.trainable_weights))
             elapsed = (time.clock() - start)
@@ -60,9 +60,9 @@ def main():
             loss_l1_test = 0
             count = 0
             spinner = MoonSpinner('Testing ')
-            for step, (x_batch_test, y_batch_test) in enumerate(test_dataset):
-                y_predict = model(x_batch_test, y_batch_test, training=False)
-                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, y_batch_test))
+            for step, (x_batch_test, ys_batch_test) in enumerate(test_dataset):
+                y_predict = model(x_batch_test, ys_batch_test, training=False)
+                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, ys_batch_test[1]))
                 loss_ssim_test += loss_ssim.numpy()
                 loss_l2_test += loss_l2.numpy()
                 loss_l1_test += loss_l1.numpy()
