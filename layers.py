@@ -197,6 +197,7 @@ class Embedding(tf.keras.layers.Layer):
         self.convblock3 = ConvMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
 
         self.conv2d = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(filters=32, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU()))
+        self.reshape = tf.keras.layers.Reshape((-1, 8 * 4 * 32))
 
     def call(self, inputs):
         # inputs: [batch_size, time, h, w, predictor]
@@ -217,7 +218,7 @@ class Embedding(tf.keras.layers.Layer):
                 out = self.convblock1(inputs[i], False)
                 out = self.convblock2(out, False)
                 out = self.convblock3(out, False)
-            out = tf.keras.layers.Reshape((T, 8 * 4 * 32))(self.conv2d(out))
+            out = self.reshape(self.conv2d(out))
             embeddings.append(out)
         embeddings = tf.transpose(embeddings, [1, 2, 0, 3])  # (b, t, m, f)
 
@@ -228,6 +229,8 @@ class Restore(tf.keras.layers.Layer):
     def __init__(self, num_predictor):
         super(Restore, self).__init__()
         self.num_predictor = num_predictor
+
+        self.reshape = tf.keras.layers.Reshape((-1, 4, 8, 32, self.num_predictor))
 
         self.deconv = tf.keras.layers.TimeDistributed(
             tf.keras.layers.Conv2DTranspose(filters=16, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU()))
@@ -240,7 +243,7 @@ class Restore(tf.keras.layers.Layer):
     def call(self, inputs, skip_layers):
         # assume inputs: (b, t, m, d_model)
         T = tf.shape(inputs)[1]
-        inputs = tf.keras.layers.Reshape((T, 4, 8, 32, self.num_predictor))(inputs)
+        inputs = self.reshape(inputs)
         inputs = tf.transpose(inputs, [5, 0, 1, 2, 3, 4])
         outputs = []
 
