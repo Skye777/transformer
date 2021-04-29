@@ -33,15 +33,15 @@ with distribution.scope():
 
     checkpoint_file = hp.ckpt
     if checkpoint_file == '':
-        checkpoint_file = 'ckp_0.h5'
+        checkpoint_file = 'ckp_0'
     else:
-        model.load_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}')
+        model.load_weights(f'{hp.multi_gpu_model_dir}/{checkpoint_file}')
 
 with distribution.scope():
     def single_step(x_batch, ys_batch, model, flag='train'):
         with tf.GradientTape() as tape:
-            y_predict = model(x_batch, ys_batch, training=True)
-            loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, ys_batch[1]))
+            y_predict = model([x_batch, ys_batch], training=True)
+            loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, ys_batch[1]])
         if flag == 'test':
             return loss_ssim, loss_l2, loss_l1, loss
         grads = tape.gradient(loss, model.trainable_weights)
@@ -107,6 +107,6 @@ with distribution.scope():
             logger.info(template.format(loss_test/count, loss_ssim_test/count, loss_l2_test/count, loss_l1_test/count))
 
             total_epoch = int(re.findall("\d+", checkpoint_file)[0])
-            checkpoint_file = checkpoint_file.replace(f'_{total_epoch}.h5', f'_{total_epoch + 1}.h5')
-            model.save_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}')
+            checkpoint_file = checkpoint_file.replace(f'_{total_epoch}', f'_{total_epoch + 1}')
+            model.save_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}', save_format='tf')
             logger.info("Saved checkpoint_file {}".format(checkpoint_file))

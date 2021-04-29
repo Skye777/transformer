@@ -20,7 +20,7 @@ class Encoder(tf.keras.layers.Layer):
             for _ in range(num_layers)]
         self.dropout = tf.keras.layers.Dropout(drop_rate)
 
-    def call(self, x, training):
+    def call(self, x, training=None):
         x, skip_layers = self.embedding(x)
         x += auxiliary_encode(x, T=self.in_seqlen)
         x = self.dropout(x, training=training)
@@ -43,17 +43,15 @@ class Decoder(tf.keras.layers.Layer):
         self.dropout = tf.keras.layers.Dropout(drop_rate)
         self.restore = Restore(num_predictor)
 
-    def call(self, x, enc_output, skip_layers, seq_len, training):
+    def call(self, inputs, training=None):
+        x, enc_output, skip_layers, seq_len = inputs
         x, _ = self.embedding(x)
-        if training is False:
-            print(x.shape)
-
-        x += auxiliary_encode(x, T=seq_len)
+        x += auxiliary_encode(x, T=tf.get_static_value(seq_len))
         x = self.dropout(x, training=training)
 
         for i in range(self.num_layers):
-            x = self.dec_layers[i](x, enc_output, training)
-        x = self.restore(x, skip_layers)
+            x = self.dec_layers[i]([x, enc_output], training)
+        x = self.restore([x, skip_layers])
 
         return x
 
@@ -70,8 +68,8 @@ class EncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(drop_rate)
         self.dropout2 = tf.keras.layers.Dropout(drop_rate)
 
-    def call(self, x, training):
-        attn_output = self.mha(x, x, x)
+    def call(self, x, training=None):
+        attn_output = self.mha([x, x, x])
         attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(x + attn_output)
 
@@ -98,12 +96,13 @@ class DecoderLayer(tf.keras.layers.Layer):
         self.dropout2 = tf.keras.layers.Dropout(drop_rate)
         self.dropout3 = tf.keras.layers.Dropout(drop_rate)
 
-    def call(self, x, enc_output, training):
-        attn1 = self.mha1(x, x, x)
+    def call(self, inputs, training=None):
+        x, enc_output = inputs
+        attn1 = self.mha1([x, x, x])
         attn1 = self.dropout1(attn1, training=training)
         out1 = self.layernorm1(attn1 + x)
 
-        attn2 = self.mha2(out1, enc_output, enc_output)
+        attn2 = self.mha2([out1, enc_output, enc_output])
         attn2 = self.dropout2(attn2, training=training)
         out2 = self.layernorm2(attn2 + out1)
 
@@ -140,7 +139,8 @@ class MultiHeadAttention(tf.keras.layers.Layer):
                                           padding='same', data_format="channels_last")
         self.dense = tf.keras.layers.Dense(self.V_filters)
 
-    def call(self, queries, keys, values):
+    def call(self, inputs, training=None):
+        queries, keys, values = inputs
         batch = tf.shape(queries)[0]
         q_t, k_t = queries.get_shape().as_list()[1], keys.get_shape().as_list()[1]
         measure, feature = queries.get_shape().as_list()[2:]
@@ -199,9 +199,8 @@ class Embedding(tf.keras.layers.Layer):
         self.conv2d = tf.keras.layers.TimeDistributed(tf.keras.layers.Conv2D(filters=32, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU()))
         self.reshape = tf.keras.layers.Reshape((-1, 8 * 4 * 32))
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         # inputs: [batch_size, time, h, w, predictor]
-        T = tf.shape(inputs)[1]
         inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)  # (predictor, batch, time, w, h, 1)
         embeddings = []
         skip_layers = {}
@@ -240,9 +239,9 @@ class Restore(tf.keras.layers.Layer):
         self.deconvblock2 = ConvTransBlock(filters=4, kernel_size=3, up_size=2)
         self.deconvblock3 = ConvTransBlock(filters=1, kernel_size=3, up_size=2)
 
-    def call(self, inputs, skip_layers):
+    def call(self, inputs, training=None):
+        inputs, skip_layers = inputs
         # assume inputs: (b, t, m, d_model)
-        T = tf.shape(inputs)[1]
         inputs = self.reshape(inputs)
         inputs = tf.transpose(inputs, [5, 0, 1, 2, 3, 4])
         outputs = []
@@ -266,7 +265,8 @@ class ConvTransBlock(tf.keras.layers.Layer):
         self.up_sampling = tf.keras.layers.TimeDistributed(tf.keras.layers.UpSampling2D(size=up_size))
         self.bn = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization())
 
-    def call(self, inputs, map):
+    def call(self, inputs, training=None):
+        inputs, map = inputs
         T = tf.shape(inputs)[1]
 
         skip_layer = tf.tile(tf.expand_dims(map, 1), [1, T, 1, 1, 1])
@@ -289,13 +289,13 @@ class ConvMaxPoolBlock(tf.keras.layers.Layer):
         self.alpha = ConvAttention(t, h, w, c, k=16)
         self.get_feature_maps = WeightedSumBlock(t, h, w, c)
 
-    def call(self, inputs, encode_phase):
+    def call(self, inputs, encode_phase=None):
         conv_out = self.conv(inputs)
         pool_out = self.max_pool(conv_out)
         bn_out = self.bn(pool_out)
         if encode_phase:
             alpha = self.alpha(bn_out)
-            skip_layer_feature_map = self.get_feature_maps(bn_out, alpha)
+            skip_layer_feature_map = self.get_feature_maps([bn_out, alpha])
             return bn_out, skip_layer_feature_map
         else:
             return bn_out
@@ -308,7 +308,7 @@ class ConvAttention(tf.keras.layers.Layer):
         self.layer1 = tf.keras.layers.Dense(units=k, activation='tanh')
         self.layer2 = tf.keras.layers.Dense(units=1)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         outputs = self.layer2(self.layer1(self.reshape(inputs)))
         outputs = tf.nn.softmax(outputs, axis=-2)
         return outputs
@@ -322,7 +322,8 @@ class WeightedSumBlock(tf.keras.layers.Layer):
         self.reshape1 = tf.keras.layers.Reshape((l, w*h*c))
         self.reshape2 = tf.keras.layers.Reshape((h, w, c))
 
-    def call(self, inputs, alpha):
+    def call(self, inputs, training=None):
+        inputs, alpha = inputs
         inputs = self.reshape1(inputs)
         info = tf.multiply(alpha, inputs)
         info = tf.keras.layers.Lambda(lambda x: tf.split(x, num_or_size_splits=self.l, axis=-2))(info)

@@ -31,7 +31,7 @@ def main():
 
     checkpoint_file = hp.ckpt
     if checkpoint_file == '':
-        checkpoint_file = 'ckp_0.h5'
+        checkpoint_file = 'ckp_0'
     else:
         model.load_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}')
 
@@ -41,8 +41,8 @@ def main():
         for step, (x_batch_train, ys_batch_train) in enumerate(train_dataset):
             start = time.clock()
             with tf.GradientTape() as tape:
-                y_predict = model(x_batch_train, ys_batch_train, training=True)
-                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, ys_batch_train[1]))
+                y_predict = model([x_batch_train, ys_batch_train], training=True)
+                loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, ys_batch_train[1]])
             grads = tape.gradient(loss, model.trainable_weights)
             optimizer.apply_gradients(zip(grads, model.trainable_weights))
             elapsed = (time.clock() - start)
@@ -61,8 +61,8 @@ def main():
             count = 0
             spinner = MoonSpinner('Testing ')
             for step, (x_batch_test, ys_batch_test) in enumerate(test_dataset):
-                y_predict = model(x_batch_test, ys_batch_test, training=False)
-                loss_ssim, loss_l2, loss_l1, loss = model_loss((y_predict, ys_batch_test[1]))
+                y_predict = model([x_batch_test, ys_batch_test], training=False)
+                loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, ys_batch_test[1]])
                 loss_ssim_test += loss_ssim.numpy()
                 loss_l2_test += loss_l2.numpy()
                 loss_l1_test += loss_l1.numpy()
@@ -79,8 +79,8 @@ def main():
             logger.info(template.format(loss_test/count, loss_ssim_test/count, loss_l2_test/count, loss_l1_test/count))
 
             total_epoch = int(re.findall("\d+", checkpoint_file)[0])
-            checkpoint_file = checkpoint_file.replace(f'_{total_epoch}.h5', f'_{total_epoch + 1}.h5')
-            model.save_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}')
+            checkpoint_file = checkpoint_file.replace(f'_{total_epoch}', f'_{total_epoch + 1}')
+            model.save_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}', save_format='tf')
             logger.info("Saved checkpoint_file {}".format(checkpoint_file))
 
 

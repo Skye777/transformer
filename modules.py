@@ -53,9 +53,9 @@ def cross_attention(Q, K, V, att_unit, q_t, k_t, model_structure, causality=Fals
         AM_Measure = tf.nn.softmax(AM_Measure)
 
         # decomposed manner in CDSA
-        Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, time, measure*value_units])), shape_time)
+        Out_Time = tf.reshape(tf.matmul(AM_Time, tf.reshape(V, [segs, q_t, measure*value_units])), shape_time)
         Out_Time = tf.transpose(Out_Time, perm=[0, 2, 1, 3])
-        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, time*value_units])), shape_measure)
+        Out_Time_M = tf.reshape(tf.matmul(AM_Measure, tf.reshape(Out_Time, [segs, measure, q_t*value_units])), shape_measure)
         Outputs = tf.transpose(Out_Time_M, perm=[0, 2, 1, 3])
 
     else:

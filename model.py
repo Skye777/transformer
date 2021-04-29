@@ -34,22 +34,22 @@ class UTransformer(tf.keras.Model):
                                d_model=hp.d_model,
                                drop_rate=hp.dropout_rate)
 
-    def call(self, x, ys, training=None, mask=None):
+    def call(self, inputs, training=None, mask=None):
         # print("inputs:", inp)
-        tar, dec_inp = ys
+        x, ys = inputs
         enc_output, skip_layers = self.encoder(x, training)
 
         if training:
-            dec_output = self.decoder(dec_inp, enc_output, skip_layers, seq_len=self.hp.out_seqlen, training=True)
+            tar, dec_inp = ys
+            dec_output = self.decoder([dec_inp, enc_output, skip_layers, self.hp.out_seqlen], training=True)
 
         else:
             decoder_inp_start = tf.expand_dims(x[:, -1, :, :, :], 1)
             decoder_inputs = decoder_inp_start
 
             for i in range(self.hp.out_seqlen):
-                dec_out = self.decoder(decoder_inputs, enc_output, skip_layers, seq_len=i+1, training=False)
+                dec_out = self.decoder([decoder_inputs, enc_output, skip_layers, i+1], training=False)
                 decoder_inputs = tf.concat((decoder_inp_start, dec_out), 1)
-                print("decoder:", decoder_inputs.shape)
 
             dec_output = decoder_inputs[:, 1:, :, :, :]
 

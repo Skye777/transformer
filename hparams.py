@@ -36,6 +36,7 @@ class Hparams:
 
     parser.add_argument('--ckpt', default='', help="checkpoint file path")
     parser.add_argument('--single_gpu_model_dir', default="ckpt/checkpoints_single")
+    parser.add_argument('--multi_gpu_model_dir', default="ckpt/checkpoints_multi")
     parser.add_argument('--lr', default=0.0003, type=float, help="learning rate")
     parser.add_argument('--warmup_steps', default=4000, type=int)
     parser.add_argument('--logdir', default="logs", help="log directory")
