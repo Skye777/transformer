@@ -1,3 +1,6 @@
+"""
+DMS: direct multi-step, don't need to predict all predictors
+"""
 import os
 import json
 import random
@@ -35,13 +38,17 @@ def parse_npz_and_nc_data():
     height = hp.height
     width = hp.width
 
-    sst = np.load(f"{hp.observe_npz_dir}/sst.npz")['sst']
-    uwind = np.load(f"{hp.observe_npz_dir}/uwind.npz")['uwind']
-    vwind = np.load(f"{hp.observe_npz_dir}/vwind.npz")['vwind']
-    sshg = np.load(f"{hp.observe_npz_dir}/sshg.npz")['sshg']
-    thflx = np.load(f"{hp.observe_npz_dir}/thflx.npz")['thflx']
+    sst = np.load(f"{hp.reanalysis_npz_dir}/{'sst-resolve'}.npz")['sst']
+    uwind = np.load(f"{hp.reanalysis_npz_dir}/{'uwind-resolve'}.npz")['uwind']
+    vwind = np.load(f"{hp.reanalysis_npz_dir}/{'vwind-resolve'}.npz")['vwind']
+    sshg = np.load(f"{hp.reanalysis_npz_dir}/{'sshg'}.npz")['sshg']
+    thflx = np.load(f"{hp.reanalysis_npz_dir}/{'thflx'}.npz")['thflx']    
 
-    sst[abs(sst) < 8e-17] = 0
+    sst = np.flip(sst, 1)
+    uwind = np.flip(uwind, 1)
+    vwind = np.flip(vwind, 1)
+    
+    sst[abs(sst) < 0] = 0
 
     scaler = MinMaxScaler()
     # scaler = StandardScaler()
@@ -60,13 +67,9 @@ def parse_npz_and_nc_data():
                      'vwind': vwind[i:i + hp.in_seqlen].astype(np.float32),
                      'sshg': sshg[i:i + hp.in_seqlen].astype(np.float32),
                      'thflx': thflx[i:i + hp.in_seqlen].astype(np.float32)})
-        
+
         target_start = i + hp.in_seqlen - 1 + hp.lead_time
-        target.append({'sst': sst[target_start:target_start + hp.out_seqlen].astype(np.float32),
-                       'uwind': uwind[target_start:target_start + hp.out_seqlen].astype(np.float32),
-                       'vwind': vwind[target_start:target_start + hp.out_seqlen].astype(np.float32),
-                       'sshg': sshg[target_start:target_start + hp.out_seqlen].astype(np.float32),
-                       'thflx': thflx[target_start:target_start + hp.out_seqlen].astype(np.float32)})
+        target.append({'sst': sst[target_start:target_start + hp.out_seqlen].astype(np.float32)})
 
     train_data, test_data, train_target, test_target = train_test_split(data, target, test_size=hp.train_eval_split,
                                                                         random_state=hp.random_seed)
@@ -78,7 +81,7 @@ def parse_npz_and_nc_data():
 def write_records(data, filename):
     series = data[0]
     target = data[1]
-    writer = tf.io.TFRecordWriter(f'{hp.observe_preprocess_out_dir}/{filename}')
+    writer = tf.io.TFRecordWriter(f'{hp.reanalysis_preprocess_out_dir}/{filename}')
 
     bar = PixelBar(r'Generating', max=len(data), suffix='%(percent)d%%')
     for s, t in zip(series, target):
@@ -88,11 +91,7 @@ def write_records(data, filename):
             'input_vwind': _bytes_feature(s['vwind'].tobytes()),
             'input_sshg': _bytes_feature(s['sshg'].tobytes()),
             'input_thflx': _bytes_feature(s['thflx'].tobytes()),
-            'output_sst': _bytes_feature(t['sst'].tobytes()),
-            'output_uwind': _bytes_feature(t['uwind'].tobytes()),
-            'output_vwind': _bytes_feature(t['vwind'].tobytes()),
-            'output_sshg': _bytes_feature(t['sshg'].tobytes()),
-            'output_thflx': _bytes_feature(t['thflx'].tobytes())
+            'output_sst': _bytes_feature(t['sst'].tobytes())
         }))
         writer.write(example.SerializeToString())
         bar.next()
@@ -102,9 +101,9 @@ def write_records(data, filename):
 
 # ---------- Go! ----------
 if __name__ == "__main__":
-    if not os.path.exists(hp.observe_preprocess_out_dir):
-        print("Creating output directory {}...".format(hp.observe_preprocess_out_dir))
-        os.makedirs(hp.observe_preprocess_out_dir)
+    if not os.path.exists(hp.reanalysis_preprocess_out_dir):
+        print("Creating output directory {}...".format(hp.reanalysis_preprocess_out_dir))
+        os.makedirs(hp.reanalysis_preprocess_out_dir)
 
     print("Parsing raw data...")
     train_data, test_data, train_target, test_target = parse_npz_and_nc_data()

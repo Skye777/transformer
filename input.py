@@ -8,17 +8,27 @@ parser = hparams.parser
 hp = parser.parse_args()
 
 
+def get_features():
+    if hp.strategy == 'DMS':
+        features = {
+            'input_sst': tf.io.FixedLenFeature([], tf.string), 'input_uwind': tf.io.FixedLenFeature([], tf.string),
+            'input_vwind': tf.io.FixedLenFeature([], tf.string), 'input_sshg': tf.io.FixedLenFeature([], tf.string),
+            'input_thflx': tf.io.FixedLenFeature([], tf.string), 'output_sst': tf.io.FixedLenFeature([], tf.string)}
+    else:
+        features = {
+            'input_sst': tf.io.FixedLenFeature([], tf.string), 'input_uwind': tf.io.FixedLenFeature([], tf.string),
+            'input_vwind': tf.io.FixedLenFeature([], tf.string), 'input_sshg': tf.io.FixedLenFeature([], tf.string),
+            'input_thflx': tf.io.FixedLenFeature([], tf.string),
+            'output_sst': tf.io.FixedLenFeature([], tf.string), 'output_uwind': tf.io.FixedLenFeature([], tf.string),
+            'output_vwind': tf.io.FixedLenFeature([], tf.string), 'output_sshg': tf.io.FixedLenFeature([], tf.string),
+            'output_thflx': tf.io.FixedLenFeature([], tf.string)}
+    return features
+
+
 def parse_fn(example):
     height = hp.height
     width = hp.width
-    
-    features = {
-        'input_sst': tf.io.FixedLenFeature([], tf.string), 'input_uwind': tf.io.FixedLenFeature([], tf.string),
-        'input_vwind': tf.io.FixedLenFeature([], tf.string), 'input_sshg': tf.io.FixedLenFeature([], tf.string),
-        'input_thflx': tf.io.FixedLenFeature([], tf.string),
-        'output_sst': tf.io.FixedLenFeature([], tf.string), 'output_uwind': tf.io.FixedLenFeature([], tf.string),
-        'output_vwind': tf.io.FixedLenFeature([], tf.string), 'output_sshg': tf.io.FixedLenFeature([], tf.string),
-        'output_thflx': tf.io.FixedLenFeature([], tf.string)}
+    features = get_features()
 
     parsed = tf.io.parse_single_example(serialized=example, features=features)
     # print("parsed:", parsed)
@@ -34,10 +44,14 @@ def parse_fn(example):
     # [time, h, w, predictor]
     inputs_list = tf.transpose(tf.squeeze(inputs_list), [1, 2, 3, 0])
     outputs_list = tf.transpose(tf.squeeze(outputs_list), [1, 2, 3, 0])
-    decoder_inp = tf.concat((tf.expand_dims(inputs_list[-1], 0), outputs_list[:-1]), axis=0)
+
+    if hp.model == 'transformer':
+        decoder_inp = tf.concat((tf.expand_dims(inputs_list[-1], 0), outputs_list[:-1]), axis=0)
+        ys = (decoder_inp, outputs_list)
+    else:
+        ys = outputs_list
 
     x = inputs_list
-    ys = (decoder_inp, outputs_list)
 
     # input_features = {}
     # output_features = {}

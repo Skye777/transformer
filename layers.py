@@ -330,3 +330,173 @@ class WeightedSumBlock(tf.keras.layers.Layer):
         outputs = tf.keras.layers.add(info)
         outputs = self.reshape2(outputs)
         return outputs
+
+
+class ConvLstmBlock(tf.keras.layers.Layer):
+    def __init__(self, hp):
+        super(ConvLstmBlock, self).__init__()
+        self.strategy = hp.strategy
+        self.convlstm1 = tf.keras.layers.ConvLSTM2D(filters=16, kernel_size=3, padding='same', return_sequences=True)
+        self.bn1 = tf.keras.layers.BatchNormalization()
+        self.convlstm2 = tf.keras.layers.ConvLSTM2D(filters=16, kernel_size=3, padding='same', return_sequences=True)
+        self.bn2 = tf.keras.layers.BatchNormalization()
+        self.convlstm3 = tf.keras.layers.ConvLSTM2D(filters=16, kernel_size=3, padding='same', return_sequences=True)
+        self.bn3 = tf.keras.layers.BatchNormalization()
+        self.alpha = ConvAttention(l=hp.in_seqlen, h=hp.height, w=hp.width, c=16, k=16)
+        self.attentionLayer = WeightedSumBlock(l=hp.in_seqlen, h=hp.height, w=hp.width, c=hp.num_predictor)
+        self.conv3d = tf.keras.layers.Conv3D(filters=1, kernel_size=3, padding='same', data_format='channels_last',
+                                             activation=tf.keras.layers.LeakyReLU())
+
+    def call(self, inputs, training=None):
+        outputs = self.bn1(self.convlstm1(inputs))
+        outputs = self.bn2(self.convlstm2(outputs))
+        outputs = self.bn3(self.convlstm3(outputs))
+        if self.strategy == 'IMS':
+            alpha = self.alpha(outputs)
+            outputs = self.attentionLayer([outputs, alpha])
+        else:
+            outputs = self.conv3d(outputs)
+
+        return outputs
+
+
+# regard variables as channels
+class EnConvlstm(tf.keras.layers.Layer):
+    def __init__(self, seq_len):
+        super(EnConvlstm, self).__init__()
+        self.convlstmblock1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4)  # here t used only in encoder
+        self.convlstmblock2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
+        self.convlstmblock3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
+        self.convlstm_sst1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4)
+        self.convlstm_sst2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
+        self.convlstm_sst3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
+
+        self.conv2d = tf.keras.layers.Conv2D(filters=64, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU())
+        # self.reshape = tf.keras.layers.Reshape((-1, 8 * 4 * 64))
+
+    def call(self, inputs, training=None):
+        # inputs: [batch_size, time, h, w, predictor]
+        # inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)  # (predictor, batch, time, w, h, 1)
+        # embeddings = []
+        skip_layers = {}
+
+        out = self.convlstmblock1(inputs, skip_layers=False)
+        out = self.convlstmblock2(out, skip_layers=False)
+        out, hidden_states = self.convlstmblock3(out, skip_layers=True)     # hidden_states (b, 20, 40, 32)
+        sst_out, map1 = self.convlstm_sst1(tf.expand_dims(inputs[:, :, :, :, 0], -1), skip_layers=True)     # (b, 80, 160, 8)
+        sst_out, map2 = self.convlstm_sst2(sst_out, skip_layers=True)     # (b, 40, 80, 16)
+        sst_out, map3 = self.convlstm_sst3(sst_out, skip_layers=True)     # (b, 20, 40, 32)
+        skip_layers['map1'] = map1
+        skip_layers['map2'] = map2
+        skip_layers['map3'] = map3
+        hidden_states = self.conv2d(hidden_states)  # (b, 4, 8, 64)
+
+        return hidden_states, skip_layers
+
+
+class ConvlstmMaxPoolBlock(tf.keras.layers.Layer):
+    def __init__(self, filters, kernel_size, pool_size, strides, t, h, w, c):
+        super(ConvlstmMaxPoolBlock, self).__init__()
+        self.convlstm = tf.keras.layers.ConvLSTM2D(filters=filters, kernel_size=kernel_size, padding='same',
+                                                   return_sequences=True, activation=tf.keras.layers.LeakyReLU())
+        self.max_pool = tf.keras.layers.MaxPool3D(pool_size=(1, pool_size, pool_size), strides=(1, strides, strides))
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.alpha = ConvAttention(t, h, w, c, k=16)
+        self.get_feature_maps = WeightedSumBlock(t, h, w, c)
+
+    def call(self, inputs, skip_layer=None):
+        conv_out = self.convlstm(inputs)
+        pool_out = self.max_pool(conv_out)
+        bn_out = self.bn(pool_out)
+        if skip_layer:
+            alpha = self.alpha(inputs)
+            skip_layer_feature_map = self.get_feature_maps([inputs, alpha])
+            return bn_out, skip_layer_feature_map
+        else:
+            return bn_out
+
+
+class DeConvlstm(tf.keras.layers.Layer):
+    def __init__(self, strategy, out_seqlen):
+        super(DeConvlstm, self).__init__()
+        self.strategy = strategy
+        self.out_seqlen = out_seqlen
+        self.deconv = tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU())
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.deconvblock1 = ConvlstmTransBlock(filters=16, kernel_size=3, up_size=2, strategy=strategy)
+        self.deconvblock2 = ConvlstmTransBlock(filters=8, kernel_size=3, up_size=2, strategy=strategy)
+        self.deconvblock3 = ConvlstmTransBlock(filters=1, kernel_size=3, up_size=2, strategy=strategy)
+
+    def call(self, inputs, training=None):
+        inputs, skip_layers = inputs
+        # (b, 4, 8, 64) --> (b, 20, 40, 32)
+        deconv_out = self.bn(self.deconv(inputs))
+        if self.strategy == 'DMS':
+            deconv_out = tf.tile(tf.expand_dims(deconv_out, 1), [1, self.out_seqlen, 1, 1, 1])
+        out = self.deconvblock1(deconv_out, skip_layers['map3'])
+        out = self.deconvblock2(out, skip_layers['map2'])
+        out = self.deconvblock3(out, skip_layers['map1'])
+        return out
+
+
+class ConvlstmTransBlock(tf.keras.layers.Layer):
+    def __init__(self, filters, kernel_size, up_size, strategy):
+        super(ConvlstmTransBlock, self).__init__()
+        self.strategy = strategy
+
+        self.deconv = tf.keras.layers.Conv2DTranspose(filters=filters, kernel_size=kernel_size, padding='same',
+                                                      activation=tf.keras.layers.LeakyReLU())
+        self.deconvlstm = tf.keras.layers.ConvLSTM2D(filters=filters, kernel_size=kernel_size, padding='same',
+                                                     return_sequences=True, activation=tf.keras.layers.LeakyReLU())
+        self.up_sampling2d = tf.keras.layers.UpSampling2D(size=up_size)
+        self.up_sampling3d = tf.keras.layers.UpSampling3D(size=(1, up_size, up_size))
+        self.bn = tf.keras.layers.TimeDistributed(tf.keras.layers.BatchNormalization())
+
+    def call(self, inputs, training=None):
+        inputs, map = inputs
+        if self.strategy == 'IMS':
+            inputs = tf.keras.layers.Concatenate()([map, inputs])
+            deconv_out = self.deconv(inputs)
+            up_sampling_out = self.up_sampling2d(deconv_out)
+        else:
+            T = tf.shape(inputs)[1]
+            skip_layer = tf.tile(tf.expand_dims(map, 1), [1, T, 1, 1, 1])
+            inputs = tf.keras.layers.Concatenate()([skip_layer, inputs])
+            deconv_out = self.deconvlstm(inputs)
+            up_sampling_out = self.up_sampling3d(deconv_out)
+        bn_out = self.bn(up_sampling_out)
+        return bn_out
+
+
+# # Each variable is modeled separately
+# class EnConvlstm(tf.keras.layers.Layer):
+#     def __init__(self, num_predictor, seq_len):
+#         super(EnConvlstm, self).__init__()
+#         self.num_predictor = num_predictor
+#
+#         self.convlstmblock1 = ConvlstmMaxPoolBlock(filters=4, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4)  # here t used only in encoder
+#         self.convlstmblock2 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
+#         self.convlstmblock3 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
+#
+#         self.conv2d = tf.keras.layers.TimeDistributed(
+#             tf.keras.layers.Conv2D(filters=32, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU()))
+#         self.reshape = tf.keras.layers.Reshape((-1, 8 * 4 * 32))
+#
+#     def call(self, inputs, training=None):
+#         # inputs: [batch_size, time, h, w, predictor]
+#         inputs = tf.expand_dims(tf.transpose(inputs, [4, 0, 1, 2, 3]), -1)  # (predictor, batch, time, w, h, 1)
+#         embeddings = []
+#         skip_layers = {}
+#
+#         for i in range(self.num_predictor):
+#             out, map1 = self.convlstmblock1(inputs[i], True)
+#             out, map2 = self.convlstmblock2(out, True)
+#             out, map3 = self.convlstmblock3(out, True)
+#             skip_layers['predictor{}_map1'.format(i + 1)] = map1
+#             skip_layers['predictor{}_map2'.format(i + 1)] = map2
+#             skip_layers['predictor{}_map3'.format(i + 1)] = map3
+#             out = self.reshape(self.conv2d(out))
+#             embeddings.append(out)
+#         embeddings = tf.transpose(embeddings, [1, 2, 0, 3])  # (b, t, m, f)
+#
+#         return embeddings, skip_layers

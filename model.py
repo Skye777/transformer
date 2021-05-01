@@ -5,7 +5,7 @@
 @description: 
 """
 import tensorflow as tf
-from layers import Encoder, Decoder
+from layers import Encoder, Decoder, ConvLstmBlock, EnConvlstm, DeConvlstm
 
 
 class UTransformer(tf.keras.Model):
@@ -54,3 +54,27 @@ class UTransformer(tf.keras.Model):
             dec_output = decoder_inputs[:, 1:, :, :, :]
 
         return dec_output
+
+
+class StackConvlstm(tf.keras.Model):
+    def __init__(self, hp):
+        super(StackConvlstm, self).__init__()
+        self.hp = hp
+        self.stackConvlstm = ConvLstmBlock(hp)
+
+    def call(self, inputs, training=None, mask=None):
+        outputs = self.stackConvlstm(inputs, training)
+
+        return outputs
+
+
+class UConvlstm(tf.keras.Model):
+    def __init__(self, hp):
+        super(UConvlstm, self).__init__()
+        self.encoder = EnConvlstm(seq_len=hp.in_seqlen)
+        self.decoder = DeConvlstm(strategy=hp.strategy, out_seqlen=hp.out_seqlen)
+
+    def call(self, inputs, training=None, mask=None):
+        hidden_states, skip_layers = self.encoder(inputs, training)
+        outputs = self.decoder([hidden_states, skip_layers], training)
+        return outputs

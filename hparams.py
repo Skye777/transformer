@@ -27,6 +27,7 @@ class Hparams:
     parser.add_argument('--output_variables', default=["sst", "uwind", "vwind", "sshg", "thflx"])
 
     # training scheme
+    parser.add_argument('--strategy', default='DMS')
     parser.add_argument('--train_eval_split', default=0.1)
     parser.add_argument('--random_seed', default=2021)
     parser.add_argument('--batch_size', default=4, type=int)
@@ -42,6 +43,7 @@ class Hparams:
     parser.add_argument('--logdir', default="logs", help="log directory")
 
     # model
+    parser.add_argument('--model', default='convlstm')
     parser.add_argument('--model_structure', default="Joint")
     parser.add_argument('--vunits', default=128)
     parser.add_argument('--Tunits', default=8)
