@@ -5,7 +5,7 @@
 @description: 
 """
 import tensorflow as tf
-from modules import cross_attention, ff, auxiliary_encode
+from component.modules import cross_attention, ff, auxiliary_encode
 
 
 class Encoder(tf.keras.layers.Layer):
@@ -248,9 +248,9 @@ class Restore(tf.keras.layers.Layer):
 
         for i in range(self.num_predictor):
             deconv_out = self.bn(self.deconv(inputs[i]))
-            out = self.deconvblock1(deconv_out, skip_layers['predictor{}_map3'.format(i+1)])
-            out = self.deconvblock2(out, skip_layers['predictor{}_map2'.format(i+1)])
-            out = self.deconvblock3(out, skip_layers['predictor{}_map1'.format(i+1)])
+            out = self.deconvblock1([deconv_out, skip_layers['predictor{}_map3'.format(i+1)]])
+            out = self.deconvblock2([out, skip_layers['predictor{}_map2'.format(i+1)]])
+            out = self.deconvblock3([out, skip_layers['predictor{}_map1'.format(i+1)]])
             outputs.append(out)
         outputs = tf.keras.layers.Concatenate()(outputs)
         return outputs
@@ -364,12 +364,12 @@ class ConvLstmBlock(tf.keras.layers.Layer):
 class EnConvlstm(tf.keras.layers.Layer):
     def __init__(self, seq_len):
         super(EnConvlstm, self).__init__()
-        self.convlstmblock1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4)  # here t used only in encoder
-        self.convlstmblock2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
-        self.convlstmblock3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
-        self.convlstm_sst1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=4)
-        self.convlstm_sst2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=8)
-        self.convlstm_sst3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=16)
+        self.convlstmblock1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=8)  # here t used only in encoder
+        self.convlstmblock2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=16)
+        self.convlstmblock3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=32)
+        self.convlstm_sst1 = ConvlstmMaxPoolBlock(filters=8, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=80, w=160, c=8)
+        self.convlstm_sst2 = ConvlstmMaxPoolBlock(filters=16, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=40, w=80, c=16)
+        self.convlstm_sst3 = ConvlstmMaxPoolBlock(filters=32, kernel_size=3, pool_size=2, strides=2, t=seq_len, h=20, w=40, c=32)
 
         self.conv2d = tf.keras.layers.Conv2D(filters=64, kernel_size=5, strides=5, activation=tf.keras.layers.LeakyReLU())
         # self.reshape = tf.keras.layers.Reshape((-1, 8 * 4 * 64))
@@ -380,12 +380,12 @@ class EnConvlstm(tf.keras.layers.Layer):
         # embeddings = []
         skip_layers = {}
 
-        out = self.convlstmblock1(inputs, skip_layers=False)
-        out = self.convlstmblock2(out, skip_layers=False)
-        out, hidden_states = self.convlstmblock3(out, skip_layers=True)     # hidden_states (b, 20, 40, 32)
-        sst_out, map1 = self.convlstm_sst1(tf.expand_dims(inputs[:, :, :, :, 0], -1), skip_layers=True)     # (b, 80, 160, 8)
-        sst_out, map2 = self.convlstm_sst2(sst_out, skip_layers=True)     # (b, 40, 80, 16)
-        sst_out, map3 = self.convlstm_sst3(sst_out, skip_layers=True)     # (b, 20, 40, 32)
+        out = self.convlstmblock1(inputs, skip_layer=False)
+        out = self.convlstmblock2(out, skip_layer=False)
+        out, hidden_states = self.convlstmblock3(out, skip_layer=True)     # hidden_states (b, 20, 40, 32)
+        sst_out, map1 = self.convlstm_sst1(tf.expand_dims(inputs[:, :, :, :, 0], -1), skip_layer=True)     # (b, 80, 160, 8)
+        sst_out, map2 = self.convlstm_sst2(sst_out, skip_layer=True)     # (b, 40, 80, 16)
+        sst_out, map3 = self.convlstm_sst3(sst_out, skip_layer=True)     # (b, 20, 40, 32)
         skip_layers['map1'] = map1
         skip_layers['map2'] = map2
         skip_layers['map3'] = map3
@@ -409,8 +409,8 @@ class ConvlstmMaxPoolBlock(tf.keras.layers.Layer):
         pool_out = self.max_pool(conv_out)
         bn_out = self.bn(pool_out)
         if skip_layer:
-            alpha = self.alpha(inputs)
-            skip_layer_feature_map = self.get_feature_maps([inputs, alpha])
+            alpha = self.alpha(bn_out)
+            skip_layer_feature_map = self.get_feature_maps([bn_out, alpha])
             return bn_out, skip_layer_feature_map
         else:
             return bn_out
@@ -433,9 +433,9 @@ class DeConvlstm(tf.keras.layers.Layer):
         deconv_out = self.bn(self.deconv(inputs))
         if self.strategy == 'DMS':
             deconv_out = tf.tile(tf.expand_dims(deconv_out, 1), [1, self.out_seqlen, 1, 1, 1])
-        out = self.deconvblock1(deconv_out, skip_layers['map3'])
-        out = self.deconvblock2(out, skip_layers['map2'])
-        out = self.deconvblock3(out, skip_layers['map1'])
+        out = self.deconvblock1([deconv_out, skip_layers['map3']])
+        out = self.deconvblock2([out, skip_layers['map2']])
+        out = self.deconvblock3([out, skip_layers['map1']])
         return out
 
 

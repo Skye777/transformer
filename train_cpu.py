@@ -12,9 +12,9 @@ import tensorflow as tf
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 from loguru import logger
 from progress.spinner import MoonSpinner
-from input import *
+from component.input import *
 from model import UTransformer, StackConvlstm, UConvlstm
-from loss import Loss
+from component.loss import Loss
 
 from hparams import Hparams
 
@@ -103,6 +103,8 @@ def u_convlstm_trainer():
             start = time.clock()
             with tf.GradientTape() as tape:
                 y_predict = model(x_batch_train, training=True)
+                print("y_pred:", y_predict.shape)
+                print("y_batch:", y_batch_train.shape)
                 loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, y_batch_train])
             grads = tape.gradient(loss, model.trainable_weights)
             optimizer.apply_gradients(zip(grads, model.trainable_weights))
@@ -209,7 +211,7 @@ def convlstm_trainer():
 
 
 if __name__ == '__main__':
-    transformer_trainer()
+    # transformer_trainer()
     # u_convlstm_trainer()
-    # convlstm_trainer()
+    convlstm_trainer()
 

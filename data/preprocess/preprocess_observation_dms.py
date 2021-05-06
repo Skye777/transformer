@@ -38,12 +38,12 @@ def parse_npz_and_nc_data():
     height = hp.height
     width = hp.width
 
-    sst = np.load(f"{hp.observe_npz_dir}/sst.npz")['sst']
-    uwind = np.load(f"{hp.observe_npz_dir}/uwind.npz")['uwind']
-    vwind = np.load(f"{hp.observe_npz_dir}/vwind.npz")['vwind']
-    sshg = np.load(f"{hp.observe_npz_dir}/sshg.npz")['sshg']
-    thflx = np.load(f"{hp.observe_npz_dir}/thflx.npz")['thflx']
-
+    train_scope = range(0, 193)   # 1982.12-1997.12
+    sst = np.load(f"{hp.observe_npz_dir}/sst.npz")['sst'][train_scope, :, :]
+    uwind = np.load(f"{hp.observe_npz_dir}/uwind.npz")['uwind'][train_scope, :, :]
+    vwind = np.load(f"{hp.observe_npz_dir}/vwind.npz")['vwind'][train_scope, :, :]
+    sshg = np.load(f"{hp.observe_npz_dir}/sshg.npz")['sshg'][train_scope, :, :]
+    thflx = np.load(f"{hp.observe_npz_dir}/thflx.npz")['thflx'][train_scope, :, :]
     sst[abs(sst) < 8e-17] = 0
 
     scaler = MinMaxScaler()

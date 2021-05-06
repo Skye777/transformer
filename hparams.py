@@ -14,17 +14,17 @@ class Hparams:
     parser.add_argument('--reanalysis_preprocess_out_dir',
                         default='/home/dl/Public/Skye/transformer/data/reanalysis_data/tfRecords')
     parser.add_argument('--observe_preprocess_out_dir',
-                        default='/home/dl/Public/Skye/transformer/data/observe_data/tfRecords')
+                        default='/home/dl/Public/Skye/transformer/data/observe_data/tfRecords/convlstm')
 
     # data
-    parser.add_argument('--in_seqlen', default=3)
-    parser.add_argument('--out_seqlen', default=3)
+    parser.add_argument('--in_seqlen', default=12)
+    parser.add_argument('--out_seqlen', default=12)
     parser.add_argument('--lead_time', default=1)
     parser.add_argument('--width', default=320)
     parser.add_argument('--height', default=160)
     parser.add_argument('--num_predictor', default=5)
     parser.add_argument('--input_variables', default=["sst", "uwind", "vwind", "sshg", "thflx"])
-    parser.add_argument('--output_variables', default=["sst", "uwind", "vwind", "sshg", "thflx"])
+    parser.add_argument('--output_variables', default=["sst"])
 
     # training scheme
     parser.add_argument('--strategy', default='DMS')
@@ -32,7 +32,7 @@ class Hparams:
     parser.add_argument('--random_seed', default=2021)
     parser.add_argument('--batch_size', default=4, type=int)
     parser.add_argument('--eval_batch_size', default=128, type=int)
-    parser.add_argument('--num_epochs', default=20, type=int)
+    parser.add_argument('--num_epochs', default=100, type=int)
     parser.add_argument('--num_epoch_record', default=1, help="Number of step to record checkpoint.")
 
     parser.add_argument('--ckpt', default='', help="checkpoint file path")
@@ -43,7 +43,7 @@ class Hparams:
     parser.add_argument('--logdir', default="logs", help="log directory")
 
     # model
-    parser.add_argument('--model', default='convlstm')
+    parser.add_argument('--model', default='uconvlstm')
     parser.add_argument('--model_structure', default="Joint")
     parser.add_argument('--vunits', default=128)
     parser.add_argument('--Tunits', default=8)
@@ -66,3 +66,8 @@ class Hparams:
     parser.add_argument('--dropout_rate', default=0.3, type=float)
     parser.add_argument('--smoothing', default=0.1, type=float,
                         help="label smoothing rate")
+
+    # test scheme
+    # parser.add_argument('--test_start', default=)
+    parser.add_argument('--delivery_model_dir', default='ckpt/checkpoints_single')
+    parser.add_argument('--delivery_model_file', default='uconvlstm-ckp_1')

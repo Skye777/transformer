@@ -43,7 +43,10 @@ def parse_fn(example):
     # print("outputs_list:", outputs_list)
     # [time, h, w, predictor]
     inputs_list = tf.transpose(tf.squeeze(inputs_list), [1, 2, 3, 0])
-    outputs_list = tf.transpose(tf.squeeze(outputs_list), [1, 2, 3, 0])
+    if hp.strategy == 'IMS':
+        outputs_list = tf.transpose(tf.squeeze(outputs_list), [1, 2, 3, 0])
+    else:
+        outputs_list = outputs_list[0]
 
     if hp.model == 'transformer':
         decoder_inp = tf.concat((tf.expand_dims(inputs_list[-1], 0), outputs_list[:-1]), axis=0)

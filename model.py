@@ -5,7 +5,7 @@
 @description: 
 """
 import tensorflow as tf
-from layers import Encoder, Decoder, ConvLstmBlock, EnConvlstm, DeConvlstm
+from component.layers import Encoder, Decoder, ConvLstmBlock, EnConvlstm, DeConvlstm
 
 
 class UTransformer(tf.keras.Model):

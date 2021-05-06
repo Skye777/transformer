@@ -12,9 +12,9 @@ import tensorflow as tf
 tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
 from loguru import logger
 from progress.spinner import MoonSpinner
-from input import *
-from model import UTransformer
-from loss import Loss
+from component.input import *
+from model import UConvlstm
+from component.loss import Loss
 
 from hparams import Hparams
 
@@ -28,20 +28,20 @@ GLOBAL_BATCH_SIZE = hp.batch_size * distribution.num_replicas_in_sync
 
 with distribution.scope():
     optimizer = tf.keras.optimizers.Adam(learning_rate=hp.lr)
-    model = UTransformer(hp)
+    model = UConvlstm(hp)
     model_loss = Loss(model)
 
     checkpoint_file = hp.ckpt
     if checkpoint_file == '':
-        checkpoint_file = 'ckp_0'
+        checkpoint_file = 'uconvlstm-ckp_0'
     else:
         model.load_weights(f'{hp.multi_gpu_model_dir}/{checkpoint_file}')
 
 with distribution.scope():
     def single_step(x_batch, ys_batch, model, flag='train'):
         with tf.GradientTape() as tape:
-            y_predict = model([x_batch, ys_batch], training=True)
-            loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, ys_batch[1]])
+            y_predict = model(x_batch, training=True)
+            loss_ssim, loss_l2, loss_l1, loss = model_loss([y_predict, ys_batch])
         if flag == 'test':
             return loss_ssim, loss_l2, loss_l1, loss
         grads = tape.gradient(loss, model.trainable_weights)
@@ -58,7 +58,7 @@ with distribution.scope():
         loss = distribution.reduce(tf.distribute.ReduceOp.MEAN, loss, axis=None)
         return loss_ssim, loss_l2, loss_l1, loss
 
-    logger.add(f"{hp.logdir}/{hp.in_seqlen}_{hp.out_seqlen}_{hp.lead_time}_train.log", enqueue=True)
+    logger.add(f"{hp.logdir}/{hp.model}-{hp.in_seqlen}_{hp.out_seqlen}_{hp.lead_time}_train.log", enqueue=True)
     train_dataset, test_dataset = train_input_fn()
     train_dist_dataset = distribution.experimental_distribute_dataset(train_dataset)
     test_dist_dataset = distribution.experimental_distribute_dataset(test_dataset)
@@ -108,5 +108,5 @@ with distribution.scope():
 
             total_epoch = int(re.findall("\d+", checkpoint_file)[0])
             checkpoint_file = checkpoint_file.replace(f'_{total_epoch}', f'_{total_epoch + 1}')
-            model.save_weights(f'{hp.single_gpu_model_dir}/{checkpoint_file}', save_format='tf')
+            model.save_weights(f'{hp.multi_gpu_model_dir}/{checkpoint_file}', save_format='tf')
             logger.info("Saved checkpoint_file {}".format(checkpoint_file))
